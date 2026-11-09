@@ -3,7 +3,7 @@ import { CheckCircle2 } from "lucide-react";
 import type { Game } from "@/types/game";
 import { cn } from "@/lib/utils";
 
-export function GameCard({ game, subtitle, className }: { game: Game; subtitle?: string; className?: string }) {
+export function GameCard({ game, subtitle, className }: { game: Game; subtitle?: string | undefined; className?: string }) {
   return (
     <Link to="/games/$id" params={{ id: game.id }} className={cn("group block shrink-0 outline-none", className)}>
       <div className="relative aspect-[3/4] overflow-hidden rounded-2xl border border-border bg-card transition-all duration-300 group-hover:-translate-y-1 group-hover:focus-glow group-focus-visible:focus-glow">
