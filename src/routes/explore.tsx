@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,6 +62,7 @@ function Explore() {
 
   const list = useMemo(() => {
     const query = q.trim().toLowerCase();
+    if (!query) return games;
     return games.filter((game) =>
       `${game.title} ${game.genre} ${game.developer}`.toLowerCase().includes(query),
     );
@@ -96,25 +97,25 @@ function Explore() {
           />
         </label>
       </div>
+
       <div className="mt-8 grid grid-cols-4 gap-6">
-        {list.map((game) => (
-          <div
-            key={game.id}
-            className="overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/50"
-          >
-            <a
-              href={game.href}
-              target={providerId === "demo" ? undefined : "_blank"}
-              rel={providerId === "demo" ? undefined : "noreferrer"}
-              className="group block"
-            >
+        {list.map((game) => {
+          const isInternal = game.href.startsWith("/");
+          const card: ReactNode = (
+            <>
               <div className="aspect-video overflow-hidden bg-secondary">
-                <img
-                  src={game.cover}
-                  alt=""
-                  loading="lazy"
-                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                />
+                {game.cover ? (
+                  <img
+                    src={game.cover}
+                    alt=""
+                    loading="lazy"
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                    No cover
+                  </div>
+                )}
               </div>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -125,37 +126,64 @@ function Explore() {
                 </div>
                 <p className="mt-1 text-xs text-primary">{game.genre}</p>
                 <p className="mt-3 line-clamp-3 text-sm text-muted-foreground">
-                  {game.description}
+                  {game.description || "Open to see details."}
                 </p>
                 <p className="mt-3 text-xs text-muted-foreground">
                   {game.developer} · {game.publisher}
                 </p>
               </div>
-            </a>
-            {isDesktop && game.sourceId !== undefined && (
-              <div className="px-4 pb-4">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full rounded-full"
-                  disabled={addedIds.has(game.sourceId)}
-                  onClick={async () => {
-                    try {
-                      await window.nexus?.addMetadataGame(game.sourceId!);
-                      setAddedIds((current) => new Set(current).add(game.sourceId!));
-                      toast.success(`${game.title} added to your library`);
-                    } catch {
-                      toast.error(`Could not add ${game.title} to your library`);
-                    }
-                  }}
+            </>
+          );
+
+          return (
+            <div
+              key={game.id}
+              className="overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/50"
+            >
+              {isInternal ? (
+                <Link
+                  // TanStack Router's strongly typed `to` requires casts for dynamic strings.
+                  to={game.href as any}
+                  className="group block"
                 >
-                  {addedIds.has(game.sourceId) ? "In library" : "Add to library"}
-                </Button>
-              </div>
-            )}
-          </div>
-        ))}
+                  {card}
+                </Link>
+              ) : (
+                <a
+                  href={game.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group block"
+                >
+                  {card}
+                </a>
+              )}
+              {isDesktop && game.sourceId !== undefined && (
+                <div className="px-4 pb-4">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full rounded-full"
+                    disabled={addedIds.has(game.sourceId)}
+                    onClick={async () => {
+                      try {
+                        await window.nexus?.addMetadataGame(game.sourceId!);
+                        setAddedIds((current) => new Set(current).add(game.sourceId!));
+                        toast.success(`${game.title} added to your library`);
+                      } catch {
+                        toast.error(`Could not add ${game.title} to your library`);
+                      }
+                    }}
+                  >
+                    {addedIds.has(game.sourceId) ? "In library" : "Add to library"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+
       {loading && <p className="mt-16 text-center text-muted-foreground">Loading games…</p>}
       {!loading && error && (
         <p role="alert" className="mt-16 text-center text-destructive">
@@ -165,6 +193,7 @@ function Explore() {
       {!loading && !error && list.length === 0 && (
         <p className="mt-16 text-center text-muted-foreground">No games match your search.</p>
       )}
+
       <p className="mt-10 text-center text-xs text-muted-foreground">
         Game information provided by{" "}
         <a
