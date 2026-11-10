@@ -76,6 +76,7 @@
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
+    "webtorrent": "^3.0.21",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -87,6 +88,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/sql.js": "^1.4.11",
+    "@types/webtorrent": "^3.0.0",
     "@vitejs/plugin-react": "^5.2.0",
     "concurrently": "^9.2.1",
     "electron": "^45.2.3",

@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Download, ExternalLink, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Pause, Play, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getFitGirlGameDetail } from "@/lib/gameCatalog.functions";
-import type { LibraryGame } from "../../electron/shared.cjs";
+import type { LibraryGame, TorrentStatus } from "../../electron/shared.cjs";
 
 export const Route = createFileRoute("/games/fitgirl/$slug")({
   loader: async ({ params }) => {
@@ -23,11 +23,20 @@ export const Route = createFileRoute("/games/fitgirl/$slug")({
   component: FitGirlGameDetails,
 });
 
+function formatBytes(bytes: number) {
+  if (bytes === 0) return "0 B";
+  const k = 1024, sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
 function FitGirlGameDetails() {
   const { detail } = Route.useLoaderData();
   const [isDesktop, setIsDesktop] = useState(false);
   const [libraryGame, setLibraryGame] = useState<LibraryGame | null>(null);
   const [busy, setBusy] = useState(false);
+  const [infoHash, setInfoHash] = useState<string | null>(null);
+  const [progress, setProgress] = useState<TorrentStatus | null>(null);
 
   const torrent = detail.torrents[0] ?? null;
 
@@ -35,46 +44,60 @@ function FitGirlGameDetails() {
     if (!window.nexus) return;
     setIsDesktop(true);
     void window.nexus.getLibrary().then((lib) => {
-      const found = lib.find(
-        (g) => g.title.toLowerCase() === detail.title.toLowerCase(),
-      );
+      const found = lib.find((g) => g.title.toLowerCase() === detail.title.toLowerCase());
       setLibraryGame(found ?? null);
     });
-  }, [detail.title]);
+
+    // Listen for torrent progress
+    const unsub = window.nexus.onTorrentProgress((statuses) => {
+      if (infoHash) {
+        const match = statuses.find((s) => s.infoHash === infoHash);
+        if (match) setProgress(match);
+      } else if (!infoHash && torrent) {
+        // Auto-find if app restarted but torrent is already running
+        const match = statuses.find((s) => s.name.toLowerCase().includes(detail.title.toLowerCase()));
+        if (match) {
+          setInfoHash(match.infoHash);
+          setProgress(match);
+        }
+      }
+    });
+    return unsub;
+  }, [detail.title, infoHash, torrent]);
 
   const handleDownload = async () => {
     if (!torrent) {
       toast.error("No torrent link was found on the FitGirl page.");
       return;
     }
+    if (!isDesktop || !window.nexus) {
+      toast.error("In-app torrent downloading requires the NEXUS desktop app.");
+      return;
+    }
+
     setBusy(true);
     try {
-      if (isDesktop && !libraryGame && window.nexus) {
-        const added = await window.nexus.addExternalMetadata({
-          title: detail.title,
-          description: detail.description.slice(0, 1000),
-          genre: detail.genre,
-          releaseDate: detail.releaseYear ? `${detail.releaseYear}` : "",
-          developer: detail.developer,
-          publisher: detail.publisher,
-          cover: detail.cover || null,
-        });
-        setLibraryGame(added);
-      }
+      const added = await window.nexus.addExternalMetadata({
+        title: detail.title,
+        description: detail.description.slice(0, 1000),
+        genre: detail.genre,
+        releaseDate: detail.releaseYear ? `${detail.releaseYear}` : "",
+        developer: detail.developer,
+        publisher: detail.publisher,
+        cover: detail.cover || null,
+      });
+      setLibraryGame(added);
 
-      if (isDesktop && window.nexus) {
-        await window.nexus.openTorrent(torrent.url);
-      } else {
-        // Web: trigger protocol handler through a real <a> click.
-        const anchor = document.createElement("a");
-        anchor.href = torrent.url;
-        anchor.rel = "noreferrer noopener";
-        anchor.click();
-      }
-      toast.success("Opening in your torrent client…");
+      const settings = await window.nexus.getSettings();
+      const safeTitle = detail.title.replace(/[<>:"/\\|?*]+/g, "");
+      const savePath = `${settings.downloadDirectory}\\${safeTitle}`;
+
+      const hash = await window.nexus.startTorrentDownload(torrent.url, savePath);
+      setInfoHash(hash);
+      toast.success("Download started in app!");
     } catch (err) {
       console.error(err);
-      toast.error("Could not open the torrent link.");
+      toast.error("Could not start the torrent download.");
     } finally {
       setBusy(false);
     }
@@ -85,6 +108,11 @@ function FitGirlGameDetails() {
     if (!confirm(`Remove "${detail.title}" from your library?`)) return;
     setBusy(true);
     try {
+      if (infoHash) {
+        await window.nexus.removeTorrent(infoHash);
+        setInfoHash(null);
+        setProgress(null);
+      }
       await window.nexus.removeGame(libraryGame.id);
       setLibraryGame(null);
       toast.success("Removed from library");
@@ -92,6 +120,17 @@ function FitGirlGameDetails() {
       toast.error("Failed to remove from library");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const togglePause = async () => {
+    if (!window.nexus || !infoHash || !progress) return;
+    if (progress.state === "paused") {
+      await window.nexus.resumeTorrent(infoHash);
+      toast.success("Resumed");
+    } else {
+      await window.nexus.pauseTorrent(infoHash);
+      toast.success("Paused");
     }
   };
 
@@ -125,15 +164,43 @@ function FitGirlGameDetails() {
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <Button
-              size="lg"
-              className="rounded-full px-8"
-              onClick={handleDownload}
-              disabled={busy || !torrent}
-            >
-              <Download /> {libraryGame ? "Download again" : "Download torrent"}
-            </Button>
-            {libraryGame && (
+            {progress ? (
+              <div className="flex w-full max-w-md flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+                <div className="flex items-center justify-between text-sm font-medium">
+                  <span className="truncate pr-2">{progress.name}</span>
+                  <span>{Math.round(progress.progress * 100)}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${progress.progress * 100}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{formatBytes(progress.downloadSpeed)}/s</span>
+                  <span>{progress.numPeers} peers</span>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={togglePause}>
+                      {progress.state === "paused" ? <Play className="size-4" /> : <Pause className="size-4" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleUninstall}>
+                      <X className="size-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Button
+                size="lg"
+                className="rounded-full px-8"
+                onClick={handleDownload}
+                disabled={busy || !torrent}
+              >
+                <Download /> {libraryGame ? "Download again" : "Download in App"}
+              </Button>
+            )}
+
+            {libraryGame && !progress && (
               <Button
                 size="lg"
                 variant="secondary"
