@@ -15,6 +15,7 @@ import { Route as ExploreRouteImport } from './routes/explore'
 import { Route as LibraryRouteImport } from './routes/library'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as GamesIdRouteImport } from './routes/games.$id'
+import { Route as GamesFitgirlSlugRouteImport } from './routes/games.fitgirl.$slug'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,11 @@ const GamesIdRoute = GamesIdRouteImport.update({
   path: '/games/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GamesFitgirlSlugRoute = GamesFitgirlSlugRouteImport.update({
+  id: '/games/fitgirl/$slug',
+  path: '/games/fitgirl/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/library': typeof LibraryRoute
   '/settings': typeof SettingsRoute
   '/games/$id': typeof GamesIdRoute
+  '/games/fitgirl/$slug': typeof GamesFitgirlSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/library': typeof LibraryRoute
   '/settings': typeof SettingsRoute
   '/games/$id': typeof GamesIdRoute
+  '/games/fitgirl/$slug': typeof GamesFitgirlSlugRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,13 +79,27 @@ export interface FileRoutesById {
   '/library': typeof LibraryRoute
   '/settings': typeof SettingsRoute
   '/games/$id': typeof GamesIdRoute
+  '/games/fitgirl/$slug': typeof GamesFitgirlSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/downloads' | '/explore' | '/library' | '/settings' | '/games/$id'
+    | '/'
+    | '/downloads'
+    | '/explore'
+    | '/library'
+    | '/settings'
+    | '/games/$id'
+    | '/games/fitgirl/$slug'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/downloads' | '/explore' | '/library' | '/settings' | '/games/$id'
+  to:
+    | '/'
+    | '/downloads'
+    | '/explore'
+    | '/library'
+    | '/settings'
+    | '/games/$id'
+    | '/games/fitgirl/$slug'
   id:
     | '__root__'
     | '/'
@@ -86,6 +108,7 @@ export interface FileRouteTypes {
     | '/library'
     | '/settings'
     | '/games/$id'
+    | '/games/fitgirl/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,6 +118,7 @@ export interface RootRouteChildren {
   LibraryRoute: typeof LibraryRoute
   SettingsRoute: typeof SettingsRoute
   GamesIdRoute: typeof GamesIdRoute
+  GamesFitgirlSlugRoute: typeof GamesFitgirlSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -141,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GamesIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/games/fitgirl/$slug': {
+      id: '/games/fitgirl/$slug'
+      path: '/games/fitgirl/$slug'
+      fullPath: '/games/fitgirl/$slug'
+      preLoaderRoute: typeof GamesFitgirlSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -151,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   LibraryRoute: LibraryRoute,
   SettingsRoute: SettingsRoute,
   GamesIdRoute: GamesIdRoute,
+  GamesFitgirlSlugRoute: GamesFitgirlSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

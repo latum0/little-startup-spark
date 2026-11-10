@@ -1,6 +1,10 @@
 import type { Game } from "@/types/game";
 import { games } from "@/data/mockGames";
-import { getFreeToGameCatalog, type FreeToGameRecord } from "@/lib/gameCatalog.functions";
+import {
+  getFitGirlCatalog,
+  getFreeToGameCatalog,
+  type FreeToGameRecord,
+} from "@/lib/gameCatalog.functions";
 import type { MetadataRecord } from "../../electron/shared.cjs";
 
 export interface CatalogGame {
@@ -13,7 +17,10 @@ export interface CatalogGame {
   publisher: string;
   cover: string;
   href: string;
+  /** FreeToGame numeric ID. Used for the "Add to library" shortcut. */
   sourceId?: number;
+  /** Slug-based ID (FitGirl, etc.). */
+  slug?: string;
 }
 
 export interface GameProvider {
@@ -66,11 +73,36 @@ const freeToGameProvider: GameProvider = {
           "No description available.",
         developer: game.developer || "Unknown developer",
         publisher: game.publisher || "Unknown publisher",
-        cover: desktopRecord ? game.thumbnail : game.thumbnail,
+        cover: game.thumbnail,
         href: desktopRecord ? game.gameUrl : game.game_url,
       };
     });
   },
 };
 
-export const gameProviders: GameProvider[] = [demoProvider, freeToGameProvider];
+const fitGirlProvider: GameProvider = {
+  id: "fitgirl",
+  name: "FitGirl Repacks",
+  attribution: { label: "FitGirl Repacks", href: "https://fitgirl-repacks.site/" },
+  async getGames() {
+    const records = await getFitGirlCatalog();
+    return records.map<CatalogGame>((game) => ({
+      id: `fitgirl-${game.id}`,
+      slug: game.id,
+      title: game.title,
+      genre: "PC Repack",
+      releaseYear: null,
+      description: "Open the game to see the full repack details and download the torrent.",
+      developer: "FitGirl",
+      publisher: "FitGirl Repacks",
+      cover: game.cover,
+      href: `/games/fitgirl/${game.id}`,
+    }));
+  },
+};
+
+export const gameProviders: GameProvider[] = [
+  fitGirlProvider,
+  demoProvider,
+  freeToGameProvider,
+];

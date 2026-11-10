@@ -39,6 +39,10 @@ export interface GameMetadataInput {
   publisher: string;
 }
 
+export interface ExternalMetadataInput extends GameMetadataInput {
+  cover: string | null;
+}
+
 export interface DownloadProgress {
   downloadId: string;
   receivedBytes: number;
@@ -52,6 +56,18 @@ export interface StorageInfo {
   freeBytes: number | null;
 }
 
+export interface MetadataRecord {
+  id: number;
+  title: string;
+  genre: string;
+  releaseDate: string;
+  description: string;
+  developer: string;
+  publisher: string;
+  thumbnail: string;
+  gameUrl: string;
+}
+
 export interface DesktopBridge {
   getAppVersion(): Promise<string>;
   getLibrary(): Promise<LibraryGame[]>;
@@ -59,6 +75,7 @@ export interface DesktopBridge {
   chooseAndAddGameFromFolder(): Promise<LibraryGame | null>;
   chooseExecutableForGame(id: string): Promise<LibraryGame>;
   addMetadataGame(id: number): Promise<LibraryGame>;
+  addExternalMetadata(input: ExternalMetadataInput): Promise<LibraryGame>;
   updateGame(id: string, details: GameMetadataInput): Promise<LibraryGame>;
   removeGame(id: string): Promise<void>;
   launchGame(id: string): Promise<void>;
@@ -72,16 +89,6 @@ export interface DesktopBridge {
   resumeDownload(id: string): Promise<void>;
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   getMetadataCatalog(): Promise<MetadataRecord[]>;
-}
-
-export interface MetadataRecord {
-  id: number;
-  title: string;
-  genre: string;
-  releaseDate: string;
-  description: string;
-  developer: string;
-  publisher: string;
-  thumbnail: string;
-  gameUrl: string;
+  /** Opens a torrent/magnet URL with the OS default torrent client. */
+  openTorrent(url: string): Promise<void>;
 }

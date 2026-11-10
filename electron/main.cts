@@ -73,6 +73,28 @@ const gameUpdateInput = z.object({
 const metadataIdInput = z.number().int().positive();
 const downloadUrlInput = z.string().url().max(4096);
 
+const externalMetadataInput = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(5000),
+  genre: z.string().max(120),
+  releaseDate: z.string().max(80),
+  developer: z.string().max(200),
+  publisher: z.string().max(200),
+  cover: z.string().url().max(2048).nullable(),
+});
+
+const torrentUrlInput = z
+  .string()
+  .min(1)
+  .max(16384)
+  .refine(
+    (value) =>
+      value.startsWith("magnet:") ||
+      value.startsWith("http://") ||
+      value.startsWith("https://"),
+    { message: "Unsupported torrent URL" },
+  );
+
 function defaultSettings(): AppSettings {
   const root = join(app.getPath("home"), "Games", "NEXUS");
   return { downloadDirectory: join(app.getPath("downloads"), "NEXUS"), installDirectory: root };
@@ -342,228 +364,4 @@ function registerIpcHandlers(): void {
     const duplicate = database
       .getGames()
       .find((game) => game.executablePath?.toLowerCase() === executable.toLowerCase());
-    return duplicate ?? database.addGame(libraryGameFromSelection(executable, folder));
-  });
-  registerHandler("library:set-executable", gameIdInput, async (id, event) => {
-    if (!database.getGame(id)) throw new Error("Game not found");
-    const executable = await selectExecutable(getMainWindow(event));
-    if (!executable) throw new Error("Executable selection was cancelled.");
-    return database.setExecutable(id, executable, dirname(executable));
-  });
-  registerHandler("library:remove", gameIdInput, (id) => database.removeGame(id));
-  registerHandler("library:update", gameUpdateInput, ({ id, details }) =>
-    database.updateGame(id, details),
-  );
-  registerHandler("library:launch", gameIdInput, async (id) => {
-    const game = database.getGame(id);
-    if (!game?.executablePath || !existsSync(game.executablePath))
-      throw new Error("Choose a valid executable for this game first.");
-    const child = spawn(game.executablePath, [], {
-      cwd: game.installPath ?? dirname(game.executablePath),
-      detached: true,
-      stdio: "ignore",
-    });
-    await new Promise<void>((resolveLaunch, rejectLaunch) => {
-      child.once("error", rejectLaunch);
-      child.once("spawn", resolveLaunch);
-    });
-    child.unref();
-    database.markPlayed(id);
-  });
-  registerHandler("settings:get", noInput, () => database.getSettings(defaultSettings()));
-  registerHandler("settings:storage", noInput, async () => {
-    const settings = database.getSettings(defaultSettings());
-    const info = await statfs(settings.installDirectory).catch(() => null);
-    return info
-      ? { totalBytes: info.blocks * info.bsize, freeBytes: info.bavail * info.bsize }
-      : { totalBytes: null, freeBytes: null };
-  });
-  registerHandler("settings:choose-directory", directoryKindInput, async (kind, event) => {
-    const parent = getMainWindow(event);
-    const current = database.getSettings(defaultSettings());
-    const defaultPath = kind === "download" ? current.downloadDirectory : current.installDirectory;
-    const options: OpenDialogOptions = {
-      properties: ["openDirectory", "createDirectory"],
-      defaultPath,
-    };
-    const result = parent
-      ? await dialog.showOpenDialog(parent, options)
-      : await dialog.showOpenDialog(options);
-    const selected = result.canceled ? null : (result.filePaths[0] ?? null);
-    if (selected) selectedDirectories.add(resolve(selected));
-    return selected;
-  });
-  registerHandler("settings:save", settingsInput, async (settings) => {
-    const current = database.getSettings(defaultSettings());
-    const safe = {
-      downloadDirectory: resolve(settings.downloadDirectory),
-      installDirectory: resolve(settings.installDirectory),
-    };
-    for (const key of ["downloadDirectory", "installDirectory"] as const) {
-      if (safe[key] !== resolve(current[key]) && !selectedDirectories.has(safe[key])) {
-        throw new Error("Choose folders using the NEXUS folder picker.");
-      }
-    }
-    selectedDirectories.delete(safe.downloadDirectory);
-    selectedDirectories.delete(safe.installDirectory);
-    await Promise.all([
-      mkdir(safe.downloadDirectory, { recursive: true }),
-      mkdir(safe.installDirectory, { recursive: true }),
-    ]);
-    return database.saveSettings(safe);
-  });
-  registerHandler("downloads:list", noInput, () => database.getDownloads());
-  registerHandler("downloads:add", downloadUrlInput, async (rawUrl, event) => {
-    const url = validateHttpUrl(rawUrl);
-    const settings = database.getSettings(defaultSettings());
-    const name = basename(new URL(url).pathname) || "download";
-    const options: SaveDialogOptions = {
-      defaultPath: join(settings.downloadDirectory, name),
-    };
-    const parent = getMainWindow(event);
-    const result = parent
-      ? await dialog.showSaveDialog(parent, options)
-      : await dialog.showSaveDialog(options);
-    if (result.canceled || !result.filePath) return null;
-    const item: DownloadItem = {
-      id: randomUUID(),
-      title: basename(result.filePath),
-      url,
-      destinationPath: result.filePath,
-      totalBytes: null,
-      receivedBytes: 0,
-      state: "queued",
-      error: null,
-      createdAt: new Date().toISOString(),
-    };
-    database.addDownload(item);
-    void startDownload(item.id);
-    return item;
-  });
-  registerHandler("downloads:cancel", gameIdInput, (id) => {
-    activeDownloads.get(id)?.abort();
-    const item = database.getDownload(id);
-    if (item && !activeDownloads.has(id)) database.updateDownload(id, { state: "cancelled" });
-  });
-  registerHandler("downloads:resume", gameIdInput, (id) => {
-    const item = database.getDownload(id);
-    if (!item || item.state === "completed") throw new Error("Download cannot be resumed.");
-    void startDownload(id);
-  });
-  registerHandler("library:add-metadata", metadataIdInput, async (id) => {
-    const record = (await getMetadataCatalog()).find((game) => game.id === id);
-    if (!record) throw new Error("Metadata item not found");
-    const existing = database
-      .getGames()
-      .find((game) => game.title.toLocaleLowerCase() === record.title.toLocaleLowerCase());
-    if (existing) return existing;
-    return database.addGame({
-      id: randomUUID(),
-      title: record.title,
-      description: record.description,
-      genre: record.genre,
-      releaseDate: record.releaseDate,
-      developer: record.developer,
-      publisher: record.publisher,
-      cover: await cacheArtwork(record),
-      executablePath: null,
-      installPath: null,
-      lastPlayedAt: null,
-      createdAt: new Date().toISOString(),
-    });
-  });
-  registerHandler("metadata:catalog", noInput, () => getMetadataCatalog());
-}
-
-async function serveRenderer(): Promise<void> {
-  const rendererDirectory = app.isPackaged
-    ? join(process.resourcesPath, "renderer")
-    : join(app.getAppPath(), ".output", "public");
-
-  await protocol.handle(appScheme, async (request) => {
-    const requestUrl = new URL(request.url);
-    const requestedPath = decodeURIComponent(requestUrl.pathname).replace(/^\/+/, "");
-    const isCover = requestedPath.startsWith("covers/");
-    const baseDirectory = isCover ? join(app.getPath("userData"), "covers") : rendererDirectory;
-    const relativePath = isCover
-      ? requestedPath.slice("covers/".length)
-      : requestedPath || "_shell.html";
-    const candidate = resolve(baseDirectory, relativePath);
-    const insideDirectory =
-      candidate === baseDirectory || candidate.startsWith(`${baseDirectory}${sep}`);
-    const filePath =
-      insideDirectory && existsSync(candidate) ? candidate : join(rendererDirectory, "_shell.html");
-    return net.fetch(pathToFileURL(filePath).toString());
-  });
-}
-
-function applyContentSecurityPolicy(window: BrowserWindow): void {
-  window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    if (!details.url.startsWith(`${appOrigin}/`)) {
-      callback({});
-      return;
-    }
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        "Content-Security-Policy": [
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
-        ],
-      },
-    });
-  });
-}
-
-async function createMainWindow(): Promise<void> {
-  const window = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1280,
-    minHeight: 720,
-    backgroundColor: "#10131f",
-    webPreferences: {
-      preload: join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-
-  applyContentSecurityPolicy(window);
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
-    return { action: "deny" };
-  });
-  window.webContents.on("will-navigate", (event, url) => {
-    if (url.startsWith(`${appOrigin}/`) || url.startsWith(`${devServerUrl}/`)) return;
-    event.preventDefault();
-    if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
-  });
-
-  if (app.isPackaged) {
-    await window.loadURL(`${appOrigin}/`);
-  } else {
-    await window.loadURL(devServerUrl);
-  }
-}
-
-app
-  .whenReady()
-  .then(async () => {
-    await initializeDatabase();
-    registerIpcHandlers();
-    if (app.isPackaged) await serveRenderer();
-    await createMainWindow();
-
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
-    });
-  })
-  .catch((error: unknown) => {
-    console.error("NEXUS failed to start", error);
-    app.quit();
-  });
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+    return duplicate ?? database.add
