@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopBridge } from "./shared.cjs";
+import type { DesktopBridge, TorrentStatus } from "./shared.cjs";
 
 const bridge: DesktopBridge = {
   getAppVersion: () => ipcRenderer.invoke("app:version") as Promise<string>,
@@ -20,6 +20,10 @@ const bridge: DesktopBridge = {
   addMetadataGame: (id) =>
     ipcRenderer.invoke("library:add-metadata", id) as Promise<
       Awaited<ReturnType<DesktopBridge["addMetadataGame"]>>
+    >,
+  addExternalMetadata: (input) =>
+    ipcRenderer.invoke("library:add-external-metadata", input) as Promise<
+      Awaited<ReturnType<DesktopBridge["addExternalMetadata"]>>
     >,
   updateGame: (id, details) =>
     ipcRenderer.invoke("library:update", { id, details }) as Promise<
@@ -63,6 +67,25 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("metadata:catalog") as Promise<
       Awaited<ReturnType<DesktopBridge["getMetadataCatalog"]>>
     >,
+  openTorrent: (url) => ipcRenderer.invoke("torrents:open", url) as Promise<void>,
+
+  /* BitTorrent Methods */
+  startTorrentDownload: (url, savePath) =>
+    ipcRenderer.invoke("torrents:add", { url, savePath }) as Promise<string>,
+  getTorrentStatuses: () =>
+    ipcRenderer.invoke("torrents:list") as Promise<TorrentStatus[]>,
+  pauseTorrent: (infoHash) =>
+    ipcRenderer.invoke("torrents:pause", infoHash) as Promise<void>,
+  resumeTorrent: (infoHash) =>
+    ipcRenderer.invoke("torrents:resume", infoHash) as Promise<void>,
+  removeTorrent: (infoHash) =>
+    ipcRenderer.invoke("torrents:remove", infoHash) as Promise<void>,
+  onTorrentProgress: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, statuses: TorrentStatus[]) =>
+      callback(statuses);
+    ipcRenderer.on("torrents:progress", listener);
+    return () => ipcRenderer.removeListener("torrents:progress", listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("nexus", bridge);

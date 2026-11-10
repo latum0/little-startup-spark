@@ -68,6 +68,19 @@ export interface MetadataRecord {
   gameUrl: string;
 }
 
+export interface TorrentStatus {
+  infoHash: string;
+  name: string;
+  progress: number;
+  downloadSpeed: number;
+  uploadSpeed: number;
+  numPeers: number;
+  timeRemaining: number;
+  downloaded: number;
+  length: number;
+  state: "downloading" | "seeding" | "paused" | "error";
+}
+
 export interface DesktopBridge {
   getAppVersion(): Promise<string>;
   getLibrary(): Promise<LibraryGame[]>;
@@ -89,6 +102,13 @@ export interface DesktopBridge {
   resumeDownload(id: string): Promise<void>;
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   getMetadataCatalog(): Promise<MetadataRecord[]>;
-  /** Opens a torrent/magnet URL with the OS default torrent client. */
   openTorrent(url: string): Promise<void>;
+  
+  /* BitTorrent Methods */
+  startTorrentDownload(url: string, savePath: string): Promise<string>;
+  getTorrentStatuses(): Promise<TorrentStatus[]>;
+  pauseTorrent(infoHash: string): Promise<void>;
+  resumeTorrent(infoHash: string): Promise<void>;
+  removeTorrent(infoHash: string): Promise<void>;
+  onTorrentProgress(callback: (statuses: TorrentStatus[]) => void): () => void;
 }
