@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { gameProviders, type CatalogGame } from "@/providers/catalog";
+
+const ITEMS_PER_PAGE = 24;
 
 export const Route = createFileRoute("/explore")({
   head: () => ({
@@ -24,6 +26,15 @@ export const Route = createFileRoute("/explore")({
   component: Explore,
 });
 
+function getPageNumbers(current: number, total: number): (number | "...")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, "...", total];
+  if (current >= total - 3) {
+    return [1, "...", total - 4, total - 3, total - 2, total - 1, total];
+  }
+  return [1, "...", current - 1, current, current + 1, "...", total];
+}
+
 function Explore() {
   const [q, setQ] = useState("");
   const [providerId, setProviderId] = useState(gameProviders[0]?.id ?? "demo");
@@ -32,6 +43,7 @@ function Explore() {
   const [error, setError] = useState<string | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const [addedIds, setAddedIds] = useState<Set<number>>(() => new Set());
+  const [page, setPage] = useState(1);
   const provider = gameProviders.find((item) => item.id === providerId) ?? gameProviders[0]!;
 
   useEffect(() => setIsDesktop(Boolean(window.nexus)), []);
@@ -41,6 +53,7 @@ function Explore() {
     setLoading(true);
     setError(null);
     setAddedIds(new Set());
+    setPage(1);
     provider
       .getGames()
       .then((items) => {
@@ -60,7 +73,7 @@ function Explore() {
     };
   }, [provider]);
 
-  const list = useMemo(() => {
+  const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) return games;
     return games.filter((game) =>
@@ -68,14 +81,42 @@ function Explore() {
     );
   }, [q, games]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = filtered.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE,
+  );
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const goToPage = (n: number) => {
+    setPage(Math.max(1, Math.min(n, totalPages)));
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const shownStart = filtered.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const shownEnd = Math.min(currentPage * ITEMS_PER_PAGE, filtered.length);
+
   return (
     <div className="px-12 pt-24 pb-16">
       <h1 className="font-display text-4xl font-bold">Explore</h1>
       <p className="mt-2 text-muted-foreground">
         Browse game information from a provider you choose.
       </p>
-      <div className="mt-8 flex items-center gap-3">
-        <Select value={providerId} onValueChange={setProviderId}>
+
+      <div className="mt-8 flex flex-wrap items-center gap-3">
+        <Select
+          value={providerId}
+          onValueChange={(v) => {
+            setProviderId(v);
+            setPage(1);
+          }}
+        >
           <SelectTrigger aria-label="Game information provider" className="w-56 rounded-full">
             <SelectValue placeholder="Choose a provider" />
           </SelectTrigger>
@@ -87,19 +128,30 @@ function Explore() {
             ))}
           </SelectContent>
         </Select>
+
         <label className="flex w-72 items-center gap-2 rounded-full border border-border bg-secondary px-4 py-2 text-sm">
           <Search className="size-4 text-muted-foreground" />
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
             placeholder="Search games"
             className="w-full bg-transparent outline-none"
           />
         </label>
+
+        {!loading && !error && filtered.length > 0 && (
+          <span className="ml-auto text-xs text-muted-foreground">
+            Showing {shownStart.toLocaleString()}–{shownEnd.toLocaleString()} of{" "}
+            {filtered.length.toLocaleString()} game{filtered.length === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
 
       <div className="mt-8 grid grid-cols-4 gap-6">
-        {list.map((game) => {
+        {pageItems.map((game) => {
           const isInternal = game.href.startsWith("/");
           const card: ReactNode = (
             <>
@@ -141,20 +193,11 @@ function Explore() {
               className="overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/50"
             >
               {isInternal ? (
-                <Link
-                  // TanStack Router's strongly typed `to` requires casts for dynamic strings.
-                  to={game.href as any}
-                  className="group block"
-                >
+                <Link to={game.href as never} className="group block">
                   {card}
                 </Link>
               ) : (
-                <a
-                  href={game.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group block"
-                >
+                <a href={game.href} target="_blank" rel="noreferrer" className="group block">
                   {card}
                 </a>
               )}
@@ -184,14 +227,68 @@ function Explore() {
         })}
       </div>
 
-      {loading && <p className="mt-16 text-center text-muted-foreground">Loading games…</p>}
+      {loading && (
+        <p className="mt-16 text-center text-muted-foreground">
+          Loading games… (large catalogs may take a moment on first visit)
+        </p>
+      )}
       {!loading && error && (
         <p role="alert" className="mt-16 text-center text-destructive">
           {error}
         </p>
       )}
-      {!loading && !error && list.length === 0 && (
+      {!loading && !error && filtered.length === 0 && (
         <p className="mt-16 text-center text-muted-foreground">No games match your search.</p>
+      )}
+
+      {!loading && !error && totalPages > 1 && (
+        <nav
+          aria-label="Pagination"
+          className="mt-12 flex flex-wrap items-center justify-center gap-2"
+        >
+          <Button
+            variant="secondary"
+            size="sm"
+            className="rounded-full"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            <ChevronLeft /> Previous
+          </Button>
+
+          {getPageNumbers(currentPage, totalPages).map((n, idx) =>
+            n === "..." ? (
+              <span
+                key={`ellipsis-${idx}`}
+                className="px-2 text-sm text-muted-foreground"
+                aria-hidden
+              >
+                …
+              </span>
+            ) : (
+              <Button
+                key={n}
+                variant={n === currentPage ? "default" : "secondary"}
+                size="sm"
+                className="min-w-9 rounded-full"
+                onClick={() => goToPage(n)}
+                aria-current={n === currentPage ? "page" : undefined}
+              >
+                {n}
+              </Button>
+            ),
+          )}
+
+          <Button
+            variant="secondary"
+            size="sm"
+            className="rounded-full"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            Next <ChevronRight />
+          </Button>
+        </nav>
       )}
 
       <p className="mt-10 text-center text-xs text-muted-foreground">
