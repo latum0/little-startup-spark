@@ -336,9 +336,18 @@ function DesktopLibraryPage() {
     try {
       await window.nexus!.chooseExecutableForGame(game.id);
       await refresh();
-      toast.success(`Executable updated for ${game.title}`);
+      toast.success(`Executable updated for ${game.title}; repack files are removed when found`);
     } catch {
       toast.error("Could not update the executable");
+    }
+  };
+
+  const launchGame = async (game: LibraryGame) => {
+    try {
+      await window.nexus!.launchGame(game.id);
+      toast.success(`Launched ${game.title}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not launch ${game.title}`);
     }
   };
 
@@ -355,6 +364,21 @@ function DesktopLibraryPage() {
       toast.success(`${game.title} removed from your library`);
     } catch {
       toast.error(`Could not remove ${game.title}`);
+    }
+  };
+
+  const uninstallGame = async (game: LibraryGame) => {
+    if (!game.installPath || !game.executablePath) {
+      toast.error("Select this game's executable before deleting its files");
+      return;
+    }
+    if (!window.confirm(`Permanently delete ${game.title} and everything in:\n${game.installPath}\n\nThis cannot be undone.`)) return;
+    try {
+      await window.nexus!.uninstallGame(game.id);
+      await refresh();
+      toast.success(`${game.title} and its files were deleted`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not uninstall ${game.title}`);
     }
   };
 
@@ -392,6 +416,11 @@ function DesktopLibraryPage() {
         <DropdownMenuItem className="text-destructive" onClick={() => void removeGame(game)}>
           Remove from library
         </DropdownMenuItem>
+        {game.installPath && game.executablePath ? (
+          <DropdownMenuItem className="text-destructive" onClick={() => void uninstallGame(game)}>
+            Uninstall and delete files
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -486,6 +515,14 @@ function DesktopLibraryPage() {
               <p className="text-xs text-muted-foreground">
                 {game.executablePath ? "Installed" : "Select executable to launch"}
               </p>
+              <Button
+                size="sm"
+                variant={game.executablePath ? "default" : "secondary"}
+                className="mt-2 rounded-full"
+                onClick={() => game.executablePath ? void launchGame(game) : void updateExecutable(game)}
+              >
+                {game.executablePath ? <><Play className="mr-1 size-4" /> Play</> : "Choose game .exe"}
+              </Button>
             </div>
           ))}
         </div>
@@ -503,6 +540,14 @@ function DesktopLibraryPage() {
               <span className="w-32 text-sm text-muted-foreground">
                 {game.executablePath ? "Installed" : "Not installed"}
               </span>
+              <Button
+                size="sm"
+                variant={game.executablePath ? "default" : "secondary"}
+                className="rounded-full"
+                onClick={() => game.executablePath ? void launchGame(game) : void updateExecutable(game)}
+              >
+                {game.executablePath ? <><Play className="mr-1 size-4" /> Play</> : "Choose .exe"}
+              </Button>
               {menu(game)}
             </div>
           ))}

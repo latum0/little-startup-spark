@@ -1,9 +1,19 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import type { IpcMainInvokeEvent, OpenDialogOptions, SaveDialogOptions } from "electron";
 import { existsSync } from "node:fs";
-import { mkdir, rename, stat, statfs, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  parse,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
@@ -11,8 +21,9 @@ import { Readable, Transform } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import initSqlJs from "sql.js";
-import WebTorrent from "webtorrent";
+import type WebTorrent from "webtorrent";
 import { NexusDatabase } from "./database.cjs";
+import { FitGirlCatalog } from "./fitgirl.cjs";
 import type {
   AppSettings,
   DownloadItem,
@@ -27,8 +38,20 @@ const appOrigin = `${appScheme}://app`;
 const devServerUrl = process.env.NEXUS_DEV_SERVER_URL ?? "http://127.0.0.1:5173";
 let database: NexusDatabase;
 let torrentClient: WebTorrent;
+let recommendationCache: {
+  games: {
+    id: string;
+    title: string;
+    category: string;
+    cover: string;
+    href: string;
+    price: string;
+  }[];
+  fetchedAt: number;
+} | null = null;
 const activeDownloads = new Map<string, AbortController>();
 const selectedDirectories = new Set<string>();
+const fitGirlCatalog = new FitGirlCatalog();
 
 protocol.registerSchemesAsPrivileged([
   { scheme: appScheme, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -84,10 +107,15 @@ const externalMetadataInput = z.object({
   publisher: z.string().max(200),
   cover: z.string().url().max(2048).nullable(),
 });
-const torrentUrlInput = z.string().min(1).max(16384).refine(
-  (value) => value.startsWith("magnet:") || value.startsWith("http://") || value.startsWith("https://"),
-  { message: "Unsupported torrent URL" },
-);
+const torrentUrlInput = z
+  .string()
+  .min(1)
+  .max(16384)
+  .refine(
+    (value) =>
+      value.startsWith("magnet:") || value.startsWith("http://") || value.startsWith("https://"),
+    { message: "Unsupported torrent URL" },
+  );
 const torrentAddInput = z.object({
   url: torrentUrlInput,
   savePath: z.string().min(1).max(2048),
@@ -96,6 +124,25 @@ const torrentAddInput = z.object({
 function defaultSettings(): AppSettings {
   const root = join(app.getPath("home"), "Games", "NEXUS");
   return { downloadDirectory: join(app.getPath("downloads"), "NEXUS"), installDirectory: root };
+}
+
+function safeGameFolderName(title: string): string {
+  const safe = title
+    .replace(/[<>:"/\\|?*]+/g, "")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  return safe && safe !== "." && safe !== ".." ? safe : "Game";
+}
+
+async function containsSetupExecutable(folder: string, depth = 0): Promise<boolean> {
+  if (depth > 2) return false;
+  const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.toLowerCase() === "setup.exe") return true;
+    if (entry.isDirectory() && (await containsSetupExecutable(join(folder, entry.name), depth + 1)))
+      return true;
+  }
+  return false;
 }
 
 async function initializeDatabase(): Promise<void> {
@@ -202,7 +249,6 @@ async function getMetadataCatalog(): Promise<MetadataRecord[]> {
 }
 
 async function cacheArtwork(record: MetadataRecord): Promise<string> {
-  if (!app.isPackaged) return record.thumbnail;
   const url = new URL(record.thumbnail);
   if (url.protocol !== "https:") return record.thumbnail;
   const suffix = extname(url.pathname).toLowerCase();
@@ -220,6 +266,30 @@ async function cacheArtwork(record: MetadataRecord): Promise<string> {
     await writeFile(localPath, bytes);
   }
   return `${appOrigin}/covers/${filename}`;
+}
+
+async function cacheRemoteArtwork(rawUrl: string, key: string): Promise<string | null> {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "https:") return null;
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok || !contentType.startsWith("image/")) return null;
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.length || bytes.byteLength > 15 * 1024 * 1024) return null;
+    const extension = contentType.includes("png")
+      ? ".png"
+      : contentType.includes("webp")
+        ? ".webp"
+        : ".jpg";
+    const directory = join(app.getPath("userData"), "covers");
+    const filename = `${key.replace(/[^a-z0-9-]/gi, "-")}${extension}`;
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, filename), bytes);
+    return `${appOrigin}/covers/${filename}`;
+  } catch {
+    return null;
+  }
 }
 
 function validateHttpUrl(value: string): string {
@@ -365,12 +435,50 @@ function registerIpcHandlers(): void {
     return duplicate ?? database.addGame(libraryGameFromSelection(executable, folder));
   });
   registerHandler("library:set-executable", gameIdInput, async (id, event) => {
-    if (!database.getGame(id)) throw new Error("Game not found");
+    const game = database.getGame(id);
+    if (!game) throw new Error("Game not found");
     const executable = await selectExecutable(getMainWindow(event));
     if (!executable) throw new Error("Executable selection was cancelled.");
-    return database.setExecutable(id, executable, dirname(executable));
+    const updated = database.setExecutable(id, executable, dirname(executable));
+    const settings = database.getSettings(defaultSettings());
+    const repackFolder = resolve(settings.downloadDirectory, safeGameFolderName(game.title));
+    const downloadRoot = resolve(settings.downloadDirectory);
+    const relativeRepack = relative(downloadRoot, repackFolder);
+    if (
+      relativeRepack &&
+      relativeRepack !== ".." &&
+      !relativeRepack.startsWith(`..${sep}`) &&
+      !isAbsolute(relativeRepack) &&
+      !resolve(executable).startsWith(`${repackFolder}${sep}`) &&
+      (await containsSetupExecutable(repackFolder))
+    ) {
+      await rm(repackFolder, { recursive: true, force: true }).catch((error) => {
+        console.warn(`Could not remove completed repack folder ${repackFolder}:`, error);
+      });
+    }
+    return updated;
   });
   registerHandler("library:remove", gameIdInput, (id) => database.removeGame(id));
+  registerHandler("library:uninstall", gameIdInput, async (id) => {
+    const game = database.getGame(id);
+    if (!game) throw new Error("Game not found");
+    if (!game.executablePath || !game.installPath)
+      throw new Error("Select the game folder and executable before uninstalling it.");
+    const folder = resolve(game.installPath);
+    const executable = relative(folder, resolve(game.executablePath));
+    const root = parse(folder).root;
+    if (
+      !executable ||
+      executable === ".." ||
+      executable.startsWith(`..${sep}`) ||
+      folder === root
+    ) {
+      throw new Error("The saved game folder is not safe to remove.");
+    }
+    const info = await stat(folder).catch(() => null);
+    if (info?.isDirectory()) await rm(folder, { recursive: true, force: true });
+    database.removeGame(id);
+  });
   registerHandler("library:update", gameUpdateInput, ({ id, details }) =>
     database.updateGame(id, details),
   );
@@ -378,16 +486,8 @@ function registerIpcHandlers(): void {
     const game = database.getGame(id);
     if (!game?.executablePath || !existsSync(game.executablePath))
       throw new Error("Choose a valid executable for this game first.");
-    const child = spawn(game.executablePath, [], {
-      cwd: game.installPath ?? dirname(game.executablePath),
-      detached: true,
-      stdio: "ignore",
-    });
-    await new Promise<void>((resolveLaunch, rejectLaunch) => {
-      child.once("error", rejectLaunch);
-      child.once("spawn", resolveLaunch);
-    });
-    child.unref();
+    const error = await shell.openPath(game.executablePath);
+    if (error) throw new Error(error);
     database.markPlayed(id);
   });
   registerHandler("settings:get", noInput, () => database.getSettings(defaultSettings()));
@@ -493,12 +593,143 @@ function registerIpcHandlers(): void {
     });
   });
   registerHandler("metadata:catalog", noInput, () => getMetadataCatalog());
-  
+  registerHandler("fitgirl:catalog", noInput, async () =>
+    (await fitGirlCatalog.getCatalog()).map((game) => ({
+      ...game,
+      cover: game.cover ? `${appOrigin}/remote-image?url=${encodeURIComponent(game.cover)}` : "",
+    })),
+  );
+  registerHandler("recommendations:catalog", noInput, async () => {
+    if (recommendationCache && Date.now() - recommendationCache.fetchedAt < 15 * 60_000) {
+      return recommendationCache.games.map((game) => ({
+        ...game,
+        cover: game.cover ? `${appOrigin}/remote-image?url=${encodeURIComponent(game.cover)}` : "",
+      }));
+    }
+    const [response, chartsResponse] = await Promise.all([
+      net.fetch("https://store.steampowered.com/api/featuredcategories/?cc=us&l=en"),
+      net
+        .fetch("https://api.steampowered.com/ISteamChartsService/GetMostPlayedGames/v1/")
+        .catch(() => null),
+    ]);
+    if (!response.ok) throw new Error(`Steam recommendations unavailable (${response.status})`);
+    const payload = (await response.json()) as Record<string, unknown>;
+    const categories = [
+      ["Top sellers", payload.top_sellers],
+      ["New releases", payload.new_releases],
+      ["Coming soon", payload.coming_soon],
+    ] as const;
+    const games = new Map<
+      string,
+      { id: string; title: string; category: string; cover: string; href: string; price: string }
+    >();
+    for (const [category, raw] of categories) {
+      if (!raw || typeof raw !== "object") continue;
+      const items = (raw as { items?: unknown }).items;
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        const id = String(record.id ?? "");
+        const title = typeof record.name === "string" ? record.name : "";
+        if (!/^\d+$/.test(id) || !title) continue;
+        const cover = [record.header_image, record.large_capsule, record.small_capsule].find(
+          (value) => typeof value === "string" && value.startsWith("https://"),
+        ) as string | undefined;
+        const priceInfo = record.final_price as { final_formatted?: unknown } | undefined;
+        const price =
+          typeof priceInfo?.final_formatted === "string" ? priceInfo.final_formatted : "";
+        const key = `${id}:${category}`;
+        games.set(key, {
+          id,
+          title,
+          category,
+          cover: cover ?? "",
+          href: `https://store.steampowered.com/app/${id}/`,
+          price,
+        });
+      }
+    }
+    // Steam's public chart endpoint supplies current player rankings; resolve
+    // the app names in one batched Store request so the Explore list is useful.
+    if (chartsResponse?.ok) {
+      try {
+        const chartPayload = (await chartsResponse.json()) as {
+          response?: { ranks?: { appid?: number; rank?: number }[] };
+        };
+        const ranks =
+          chartPayload.response?.ranks
+            ?.filter((entry) => Number.isInteger(entry.appid))
+            .slice(0, 100) ?? [];
+        const ids = ranks.map((entry) => String(entry.appid));
+        if (ids.length) {
+          const detailsResponse = await net.fetch(
+            `https://store.steampowered.com/api/appdetails?appids=${ids.join(",")}&cc=us&l=en`,
+          );
+          if (detailsResponse.ok) {
+            const details = (await detailsResponse.json()) as Record<
+              string,
+              { success?: boolean; data?: Record<string, unknown> }
+            >;
+            for (const entry of ranks) {
+              const id = String(entry.appid);
+              const game = details[id]?.data;
+              if (!game || typeof game.name !== "string") continue;
+              const cover =
+                typeof game.header_image === "string"
+                  ? game.header_image
+                  : `https://cdn.akamai.steamstatic.com/steam/apps/${id}/header.jpg`;
+              games.set(`${id}:Most played`, {
+                id,
+                title: game.name,
+                category: "Most played",
+                cover,
+                href: `https://store.steampowered.com/app/${id}/`,
+                price: "",
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("Could not load Steam most-played chart:", error);
+      }
+    }
+    if (games.size === 0) throw new Error("Steam returned no recommendation data");
+    recommendationCache = { games: [...games.values()], fetchedAt: Date.now() };
+    return recommendationCache.games.map((game) => ({
+      ...game,
+      cover: game.cover ? `${appOrigin}/remote-image?url=${encodeURIComponent(game.cover)}` : "",
+    }));
+  });
+  registerHandler(
+    "fitgirl:detail",
+    z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[a-z0-9][a-z0-9-]*$/i),
+    async (slug) => {
+      const detail = await fitGirlCatalog.getGameDetail(slug);
+      return {
+        ...detail,
+        cover: detail.cover
+          ? `${appOrigin}/remote-image?url=${encodeURIComponent(detail.cover)}`
+          : "",
+        screenshots: detail.screenshots.map(
+          (url) => `${appOrigin}/remote-image?url=${encodeURIComponent(url)}`,
+        ),
+      };
+    },
+  );
+
   registerHandler("library:add-external-metadata", externalMetadataInput, (input) => {
     const existing = database
       .getGames()
       .find((game) => game.title.toLocaleLowerCase() === input.title.toLocaleLowerCase());
-    if (existing) return existing;
+    if (existing)
+      return !existing.cover && input.cover
+        ? database.setCover(existing.id, input.cover)
+        : existing;
     return database.addGame({
       id: randomUUID(),
       title: input.title,
@@ -520,14 +751,50 @@ function registerIpcHandlers(): void {
   });
 
   /* ─────────────── BitTorrent Handlers ─────────────── */
-  
+
   registerHandler("torrents:add", torrentAddInput, async ({ url, savePath }) => {
     await mkdir(savePath, { recursive: true });
     return new Promise<string>((resolve, reject) => {
-      const torrent = torrentClient.add(url, { path: savePath }, (t) => {
-        resolve(t.infoHash);
+      const torrent = torrentClient.add(url, { path: savePath });
+      torrent.once("done", () => {
+        const setup = torrent.files.find(
+          (file) => basename(file.path).toLowerCase() === "setup.exe",
+        );
+        const setupPath = setup ? join(savePath, setup.path) : null;
+        // A completed torrent should not keep uploading. Close WebTorrent's chunk
+        // store while preserving the downloaded files so setup can inspect them.
+        torrent.destroy({}, (closeError) => {
+          if (closeError) {
+            console.error("Could not release completed torrent files:", closeError);
+            return;
+          }
+          if (!setupPath) return;
+          void shell.openPath(setupPath).then((error) => {
+            if (error) console.error(`Could not open game setup: ${error}`);
+          });
+        });
       });
-      torrent.on("error", (err: Error) => reject(err));
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        torrent.destroy();
+        reject(new Error("Timed out while reading the torrent. Check the link and try again."));
+      }, 60_000);
+      const finish = (infoHash: string) => {
+        if (settled || !infoHash) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(infoHash);
+      };
+      torrent.on("infoHash", () => finish(torrent.infoHash));
+      torrent.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(err instanceof Error ? err : new Error(err));
+      });
+      finish(torrent.infoHash);
     });
   });
 
@@ -542,22 +809,27 @@ function registerIpcHandlers(): void {
       timeRemaining: t.timeRemaining,
       downloaded: t.downloaded,
       length: t.length || 0,
-      state: t.paused ? ("paused" as const) : t.done ? ("seeding" as const) : ("downloading" as const),
+      savePath: t.path,
+      state: t.paused
+        ? ("paused" as const)
+        : t.done
+          ? ("seeding" as const)
+          : ("downloading" as const),
     }));
   });
 
-  registerHandler("torrents:pause", z.string(), (infoHash) => {
-    const torrent = torrentClient.get(infoHash);
+  registerHandler("torrents:pause", z.string(), async (infoHash) => {
+    const torrent = await torrentClient.get(infoHash);
     if (torrent) torrent.pause();
   });
 
-  registerHandler("torrents:resume", z.string(), (infoHash) => {
-    const torrent = torrentClient.get(infoHash);
+  registerHandler("torrents:resume", z.string(), async (infoHash) => {
+    const torrent = await torrentClient.get(infoHash);
     if (torrent) torrent.resume();
   });
 
-  registerHandler("torrents:remove", z.string(), (infoHash) => {
-    const torrent = torrentClient.get(infoHash);
+  registerHandler("torrents:remove", z.string(), async (infoHash) => {
+    const torrent = await torrentClient.get(infoHash);
     if (torrent) {
       torrent.destroy();
     }
@@ -571,6 +843,29 @@ async function serveRenderer(): Promise<void> {
 
   await protocol.handle(appScheme, async (request) => {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === "/remote-image") {
+      const source = new URL(requestUrl.searchParams.get("url") ?? "");
+      if (source.protocol !== "https:" || !source.hostname.includes(".")) {
+        return new Response("Invalid image URL", { status: 400 });
+      }
+      try {
+        const response = await net.fetch(source.toString(), {
+          headers: { Referer: "https://fitgirl-repacks.site/" },
+        });
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!response.ok || !contentType.startsWith("image/")) {
+          return new Response("Image unavailable", { status: 404 });
+        }
+        const bytes = Buffer.from(await response.arrayBuffer());
+        if (bytes.byteLength > 15 * 1024 * 1024)
+          return new Response("Image too large", { status: 413 });
+        return new Response(bytes, {
+          headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=86400" },
+        });
+      } catch {
+        return new Response("Image unavailable", { status: 502 });
+      }
+    }
     const requestedPath = decodeURIComponent(requestUrl.pathname).replace(/^\/+/, "");
     const isCover = requestedPath.startsWith("covers/");
     const baseDirectory = isCover ? join(app.getPath("userData"), "covers") : rendererDirectory;
@@ -609,6 +904,9 @@ async function createMainWindow(): Promise<void> {
     height: 900,
     minWidth: 1280,
     minHeight: 720,
+    frame: false,
+    fullscreen: true,
+    autoHideMenuBar: true,
     backgroundColor: "#10131f",
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -616,6 +914,16 @@ async function createMainWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+
+  window.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    if (input.key === "F11") {
+      event.preventDefault();
+      window.setFullScreen(!window.isFullScreen());
+    } else if (input.key === "Escape" && window.isFullScreen()) {
+      window.setFullScreen(false);
+    }
   });
 
   applyContentSecurityPolicy(window);
@@ -653,6 +961,7 @@ function broadcastTorrentProgress(): void {
     timeRemaining: t.timeRemaining,
     downloaded: t.downloaded,
     length: t.length || 0,
+    savePath: t.path,
     state: t.paused ? "paused" : t.done ? "seeding" : "downloading",
   }));
 
@@ -665,7 +974,8 @@ app
   .whenReady()
   .then(async () => {
     await initializeDatabase();
-    torrentClient = new WebTorrent({
+    const { default: WebTorrentClient } = await import("webtorrent");
+    torrentClient = new WebTorrentClient({
       maxConns: 50,
     });
     setInterval(broadcastTorrentProgress, 1000);

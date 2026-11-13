@@ -30,6 +30,7 @@ const bridge: DesktopBridge = {
       Awaited<ReturnType<DesktopBridge["updateGame"]>>
     >,
   removeGame: (id) => ipcRenderer.invoke("library:remove", id) as Promise<void>,
+  uninstallGame: (id) => ipcRenderer.invoke("library:uninstall", id) as Promise<void>,
   launchGame: (id) => ipcRenderer.invoke("library:launch", id) as Promise<void>,
   getSettings: () =>
     ipcRenderer.invoke("settings:get") as Promise<
@@ -67,19 +68,27 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("metadata:catalog") as Promise<
       Awaited<ReturnType<DesktopBridge["getMetadataCatalog"]>>
     >,
+  getFitGirlCatalog: () =>
+    ipcRenderer.invoke("fitgirl:catalog") as Promise<
+      Awaited<ReturnType<DesktopBridge["getFitGirlCatalog"]>>
+    >,
+  getFitGirlGameDetail: (slug) =>
+    ipcRenderer.invoke("fitgirl:detail", slug) as Promise<
+      Awaited<ReturnType<DesktopBridge["getFitGirlGameDetail"]>>
+    >,
+  getGameRecommendations: () =>
+    ipcRenderer.invoke("recommendations:catalog") as Promise<
+      Awaited<ReturnType<DesktopBridge["getGameRecommendations"]>>
+    >,
   openTorrent: (url) => ipcRenderer.invoke("torrents:open", url) as Promise<void>,
 
   /* BitTorrent Methods */
   startTorrentDownload: (url, savePath) =>
     ipcRenderer.invoke("torrents:add", { url, savePath }) as Promise<string>,
-  getTorrentStatuses: () =>
-    ipcRenderer.invoke("torrents:list") as Promise<TorrentStatus[]>,
-  pauseTorrent: (infoHash) =>
-    ipcRenderer.invoke("torrents:pause", infoHash) as Promise<void>,
-  resumeTorrent: (infoHash) =>
-    ipcRenderer.invoke("torrents:resume", infoHash) as Promise<void>,
-  removeTorrent: (infoHash) =>
-    ipcRenderer.invoke("torrents:remove", infoHash) as Promise<void>,
+  getTorrentStatuses: () => ipcRenderer.invoke("torrents:list") as Promise<TorrentStatus[]>,
+  pauseTorrent: (infoHash) => ipcRenderer.invoke("torrents:pause", infoHash) as Promise<void>,
+  resumeTorrent: (infoHash) => ipcRenderer.invoke("torrents:resume", infoHash) as Promise<void>,
+  removeTorrent: (infoHash) => ipcRenderer.invoke("torrents:remove", infoHash) as Promise<void>,
   onTorrentProgress: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, statuses: TorrentStatus[]) =>
       callback(statuses);

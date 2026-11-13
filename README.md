@@ -22,3 +22,16 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Install the desktop app
+
+NEXUS is an Electron desktop app. To create an installer for your computer, install the dependencies and run the build command for your operating system:
+
+```sh
+npm install
+npm run desktop:build:win    # Windows installer (.exe)
+npm run desktop:build:mac    # macOS disk image (.dmg)
+npm run desktop:build:linux  # Linux AppImage
+```
+
+Run only the command for the platform you want to package. The installer is written to `dist/`. On Windows, open the generated NEXUS setup `.exe` and follow the installer; it lets you choose an installation folder and creates Start Menu shortcuts. For local desktop development, use `npm run desktop:dev`.

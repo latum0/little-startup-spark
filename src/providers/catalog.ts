@@ -5,7 +5,7 @@ import {
   getFreeToGameCatalog,
   type FreeToGameRecord,
 } from "@/lib/gameCatalog.functions";
-import type { MetadataRecord } from "../../electron/shared.cjs";
+import type { GameRecommendation, MetadataRecord } from "../../electron/shared.cjs";
 
 export interface CatalogGame {
   id: string;
@@ -21,6 +21,7 @@ export interface CatalogGame {
   sourceId?: number;
   /** Slug-based ID (FitGirl, etc.). */
   slug?: string;
+  recommendationCategory?: string;
 }
 
 export interface GameProvider {
@@ -85,7 +86,9 @@ const fitGirlProvider: GameProvider = {
   name: "FitGirl Repacks",
   attribution: { label: "FitGirl Repacks", href: "https://fitgirl-repacks.site/" },
   async getGames() {
-    const records = await getFitGirlCatalog();
+    const records = window.nexus
+      ? await window.nexus.getFitGirlCatalog()
+      : await getFitGirlCatalog();
     return records.map<CatalogGame>((game) => ({
       id: `fitgirl-${game.id}`,
       slug: game.id,
@@ -101,7 +104,30 @@ const fitGirlProvider: GameProvider = {
   },
 };
 
+const steamRecommendationsProvider: GameProvider = {
+  id: "steam-recommendations",
+  name: "Steam recommendations",
+  attribution: { label: "Steam Store charts", href: "https://store.steampowered.com/charts/" },
+  async getGames() {
+    if (!window.nexus) return [];
+    const records: GameRecommendation[] = await window.nexus.getGameRecommendations();
+    return records.map((game) => ({
+      id: `steam-${game.id}-${game.category}`,
+      title: game.title,
+      genre: game.category,
+      releaseYear: null,
+      description: `${game.category} on Steam.`,
+      developer: "Steam Store",
+      publisher: "Steam",
+      cover: game.cover,
+      href: game.href,
+      recommendationCategory: game.category,
+    }));
+  },
+};
+
 export const gameProviders: GameProvider[] = [
+  steamRecommendationsProvider,
   fitGirlProvider,
   demoProvider,
   freeToGameProvider,

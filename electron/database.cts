@@ -189,6 +189,13 @@ export class NexusDatabase {
     return game;
   }
 
+  setCover(id: string, cover: string): LibraryGame {
+    this.db.prepare("UPDATE games SET cover = ? WHERE id = ?").run(cover, id);
+    const game = this.getGame(id);
+    if (!game) throw new Error("Game not found");
+    return game;
+  }
+
   updateGame(id: string, details: GameMetadataInput): LibraryGame {
     this.db
       .prepare(

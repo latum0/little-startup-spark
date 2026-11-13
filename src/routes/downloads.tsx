@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { getGame, mockDownloads } from "@/data/mockGames";
 import type { Download } from "@/types/game";
 import { toast } from "sonner";
-import type { DownloadItem, DownloadProgress } from "../../electron/shared.cjs";
+import type { DownloadItem, DownloadProgress, TorrentStatus } from "../../electron/shared.cjs";
 
 export const Route = createFileRoute("/downloads")({
   head: () => ({
@@ -66,13 +66,19 @@ function MockDownloadsPage() {
 
 function DesktopDownloadsPage() {
   const [items, setItems] = useState<DownloadItem[]>([]);
+  const [torrents, setTorrents] = useState<TorrentStatus[]>([]);
   const [speedById, setSpeedById] = useState<Record<string, number>>({});
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(true);
 
   const refresh = async () => {
     try {
-      setItems(await window.nexus!.getDownloads());
+      const [downloads, activeTorrents] = await Promise.all([
+        window.nexus!.getDownloads(),
+        window.nexus!.getTorrentStatuses(),
+      ]);
+      setItems(downloads);
+      setTorrents(activeTorrents);
     } catch {
       toast.error("Could not load downloads");
     } finally {
@@ -82,7 +88,7 @@ function DesktopDownloadsPage() {
 
   useEffect(() => {
     void refresh();
-    return window.nexus!.onDownloadProgress((progress: DownloadProgress) => {
+    const stopDownloadUpdates = window.nexus!.onDownloadProgress((progress: DownloadProgress) => {
       setSpeedById((current) => ({ ...current, [progress.downloadId]: progress.bytesPerSecond }));
       setItems((current) =>
         current.map((item) =>
@@ -97,6 +103,11 @@ function DesktopDownloadsPage() {
         ),
       );
     });
+    const stopTorrentUpdates = window.nexus!.onTorrentProgress(setTorrents);
+    return () => {
+      stopDownloadUpdates();
+      stopTorrentUpdates();
+    };
   }, []);
 
   const add = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -128,6 +139,25 @@ function DesktopDownloadsPage() {
       await refresh();
     } catch {
       toast.error("Could not resume this download");
+    }
+  };
+
+  const toggleTorrent = async (torrent: TorrentStatus) => {
+    try {
+      if (torrent.state === "paused") await window.nexus!.resumeTorrent(torrent.infoHash);
+      else await window.nexus!.pauseTorrent(torrent.infoHash);
+      setTorrents(await window.nexus!.getTorrentStatuses());
+    } catch {
+      toast.error("Could not update this game download");
+    }
+  };
+
+  const removeTorrent = async (infoHash: string) => {
+    try {
+      await window.nexus!.removeTorrent(infoHash);
+      setTorrents(await window.nexus!.getTorrentStatuses());
+    } catch {
+      toast.error("Could not stop this game download");
     }
   };
 
@@ -166,15 +196,66 @@ function DesktopDownloadsPage() {
       </form>
       {loading ? (
         <p className="mt-10 text-muted-foreground">Loading downloads…</p>
-      ) : sections.every(([, list]) => list.length === 0) ? (
+      ) : sections.every(([, list]) => list.length === 0) && torrents.length === 0 ? (
         <p className="mt-12 text-center text-muted-foreground">
           No downloads yet. Add a direct download link above.
         </p>
       ) : (
-        sections.map(
-          ([title, list]) =>
-            list.length > 0 && (
-              <section key={title} className="mt-10">
+        <>
+          {torrents.length > 0 && (
+            <section className="mt-10">
+              <h2 className="mb-4 font-display text-lg font-semibold text-muted-foreground">
+                Game downloads
+              </h2>
+              <div className="space-y-3">
+                {torrents.map((torrent) => {
+                  const percent = Math.min(100, torrent.progress * 100);
+                  return (
+                    <div
+                      key={torrent.infoHash}
+                      className="flex items-center gap-5 rounded-2xl border border-border bg-card p-4"
+                    >
+                      <div className="grid size-14 shrink-0 place-items-center rounded-xl bg-secondary">
+                        <DownloadIcon className="size-6 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-display font-semibold">{torrent.name}</p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">Saved in {torrent.savePath}</p>
+                        <Progress value={percent} className="mt-3 h-1.5" />
+                        <div className="mt-2 flex flex-wrap gap-5 text-xs text-muted-foreground">
+                          <span>{formatBytes(torrent.downloaded)} / {formatBytes(torrent.length)}</span>
+                          <span>{formatSpeed(torrent.downloadSpeed)}</span>
+                          <span>{torrent.numPeers} peers</span>
+                          <span>{torrent.state === "seeding" ? "Completed · seeding" : torrent.state}</span>
+                          {torrent.length > 0 && <span>{percent.toFixed(0)}%</span>}
+                        </div>
+                      </div>
+                      {torrent.state !== "seeding" && (
+                        <button
+                          onClick={() => void toggleTorrent(torrent)}
+                          aria-label={torrent.state === "paused" ? `Resume ${torrent.name}` : `Pause ${torrent.name}`}
+                          className="grid size-10 place-items-center rounded-full bg-secondary hover:bg-accent"
+                        >
+                          {torrent.state === "paused" ? <Play className="size-4" /> : <Pause className="size-4" />}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => void removeTorrent(torrent.infoHash)}
+                        aria-label={`Stop ${torrent.name}`}
+                        className="grid size-10 place-items-center rounded-full bg-secondary text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+          {sections.map(
+            ([title, list]) =>
+              list.length > 0 && (
+                <section key={title} className="mt-10">
                 <h2 className="mb-4 font-display text-lg font-semibold text-muted-foreground">
                   {title}
                 </h2>
@@ -244,9 +325,10 @@ function DesktopDownloadsPage() {
                     );
                   })}
                 </div>
-              </section>
-            ),
-        )
+                </section>
+              ),
+          )}
+        </>
       )}
     </div>
   );

@@ -8,7 +8,10 @@ import type { LibraryGame, TorrentStatus } from "../../electron/shared.cjs";
 
 export const Route = createFileRoute("/games/fitgirl/$slug")({
   loader: async ({ params }) => {
-    const detail = await getFitGirlGameDetail({ data: { slug: params.slug } });
+    const detail =
+      typeof window !== "undefined" && window.nexus
+        ? await window.nexus.getFitGirlGameDetail(params.slug)
+        : await getFitGirlGameDetail({ data: { slug: params.slug } });
     return { detail };
   },
   head: ({ loaderData }) => ({
@@ -38,7 +41,7 @@ function FitGirlGameDetails() {
   const [infoHash, setInfoHash] = useState<string | null>(null);
   const [progress, setProgress] = useState<TorrentStatus | null>(null);
 
-  const torrent = detail.torrents[0] ?? null;
+  const torrent = detail.torrents.find((item) => item.label === "Magnet link") ?? detail.torrents[0] ?? null;
 
   useEffect(() => {
     if (!window.nexus) return;
@@ -46,6 +49,15 @@ function FitGirlGameDetails() {
     void window.nexus.getLibrary().then((lib) => {
       const found = lib.find((g) => g.title.toLowerCase() === detail.title.toLowerCase());
       setLibraryGame(found ?? null);
+    });
+    void window.nexus.getTorrentStatuses().then((statuses) => {
+      const current = statuses.find((status) =>
+        status.name.toLowerCase().includes(detail.title.toLowerCase()),
+      );
+      if (current) {
+        setInfoHash(current.infoHash);
+        setProgress(current);
+      }
     });
 
     // Listen for torrent progress
@@ -77,6 +89,12 @@ function FitGirlGameDetails() {
 
     setBusy(true);
     try {
+      const settings = await window.nexus.getSettings();
+      const safeTitle = detail.title.replace(/[<>:"/\\|?*]+/g, "").trim().replace(/[. ]+$/g, "") || "Game";
+      const savePath = `${settings.downloadDirectory}\\${safeTitle}`;
+
+      const hash = await window.nexus.startTorrentDownload(torrent.url, savePath);
+      setInfoHash(hash);
       const added = await window.nexus.addExternalMetadata({
         title: detail.title,
         description: detail.description.slice(0, 1000),
@@ -87,17 +105,10 @@ function FitGirlGameDetails() {
         cover: detail.cover || null,
       });
       setLibraryGame(added);
-
-      const settings = await window.nexus.getSettings();
-      const safeTitle = detail.title.replace(/[<>:"/\\|?*]+/g, "");
-      const savePath = `${settings.downloadDirectory}\\${safeTitle}`;
-
-      const hash = await window.nexus.startTorrentDownload(torrent.url, savePath);
-      setInfoHash(hash);
       toast.success("Download started in app!");
     } catch (err) {
       console.error(err);
-      toast.error("Could not start the torrent download.");
+      toast.error(err instanceof Error ? err.message : "Could not start the torrent download.");
     } finally {
       setBusy(false);
     }
@@ -131,6 +142,41 @@ function FitGirlGameDetails() {
     } else {
       await window.nexus.pauseTorrent(infoHash);
       toast.success("Paused");
+    }
+  };
+
+  const stopDownload = async () => {
+    if (!window.nexus || !infoHash) return;
+    try {
+      await window.nexus.removeTorrent(infoHash);
+      setInfoHash(null);
+      setProgress(null);
+      toast.success("Game download stopped");
+    } catch {
+      toast.error("Could not stop the game download");
+    }
+  };
+
+  const chooseExecutable = async () => {
+    if (!window.nexus || !libraryGame) return;
+    setBusy(true);
+    try {
+      setLibraryGame(await window.nexus.chooseExecutableForGame(libraryGame.id));
+      toast.success("Game executable saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not select the game executable");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const launchGame = async () => {
+    if (!window.nexus || !libraryGame) return;
+    try {
+      await window.nexus.launchGame(libraryGame.id);
+      toast.success(`Launched ${libraryGame.title}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not launch this game");
     }
   };
 
@@ -183,7 +229,7 @@ function FitGirlGameDetails() {
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={togglePause}>
                       {progress.state === "paused" ? <Play className="size-4" /> : <Pause className="size-4" />}
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleUninstall}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => void stopDownload()}>
                       <X className="size-4 text-destructive" />
                     </Button>
                   </div>
@@ -196,19 +242,30 @@ function FitGirlGameDetails() {
                 onClick={handleDownload}
                 disabled={busy || !torrent}
               >
-                <Download /> {libraryGame ? "Download again" : "Download in App"}
+                <Download /> {busy ? "Starting…" : libraryGame ? "Download again" : "Download in App"}
               </Button>
             )}
 
             {libraryGame && !progress && (
+              libraryGame.executablePath ? (
+                <Button size="lg" variant="secondary" className="rounded-full px-8" onClick={() => void launchGame()}>
+                  <Play /> Play
+                </Button>
+              ) : (
+                <Button size="lg" variant="secondary" className="rounded-full px-8" onClick={() => void chooseExecutable()} disabled={busy}>
+                  <Play /> Choose executable
+                </Button>
+              )
+            )}
+            {libraryGame && (
               <Button
                 size="lg"
-                variant="secondary"
-                className="rounded-full px-8"
+                variant="ghost"
+                className="rounded-full px-8 text-destructive"
                 onClick={handleUninstall}
                 disabled={busy}
               >
-                <Trash2 /> Uninstall
+                <Trash2 /> Remove from library
               </Button>
             )}
             <Button size="lg" variant="ghost" className="rounded-full" asChild>

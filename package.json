@@ -13,7 +13,10 @@
     "desktop:dev": "npm run desktop:compile && concurrently -k \"npm:desktop:main:watch\" \"vite dev --host 127.0.0.1 --port 5173\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",
-    "desktop:build": "npm run build && npm run desktop:compile && electron-builder --win nsis",
+    "desktop:build": "npm run build && npm run desktop:compile && electron-builder",
+    "desktop:build:win": "npm run build && npm run desktop:compile && electron-builder --win nsis",
+    "desktop:build:mac": "npm run build && npm run desktop:compile && electron-builder --mac dmg",
+    "desktop:build:linux": "npm run build && npm run desktop:compile && electron-builder --linux AppImage",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -113,8 +116,10 @@
     "appId": "com.nexus.launcher",
     "productName": "NEXUS",
     "asar": true,
+    "npmRebuild": false,
     "files": [
       "electron-dist/**/*",
+      "node_modules/**/*",
       "package.json"
     ],
     "extraResources": [
@@ -125,6 +130,14 @@
     ],
     "win": {
       "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.games"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Game"
     },
     "nsis": {
       "oneClick": false,

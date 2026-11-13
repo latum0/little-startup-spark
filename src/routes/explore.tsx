@@ -1,8 +1,15 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -13,6 +20,18 @@ import {
 import { gameProviders, type CatalogGame } from "@/providers/catalog";
 
 const ITEMS_PER_PAGE = 24;
+const GOTY_WINNERS = new Set([
+  "the witcher 3 wild hunt",
+  "overwatch",
+  "the legend of zelda breath of the wild",
+  "god of war",
+  "sekiro shadows die twice",
+  "the last of us part ii",
+  "it takes two",
+  "elden ring",
+  "baldur s gate 3",
+  "astro bot",
+]);
 
 export const Route = createFileRoute("/explore")({
   head: () => ({
@@ -37,16 +56,70 @@ function getPageNumbers(current: number, total: number): (number | "...")[] {
 
 function Explore() {
   const [q, setQ] = useState("");
-  const [providerId, setProviderId] = useState(gameProviders[0]?.id ?? "demo");
+  const [providerId, setProviderId] = useState("fitgirl");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [genreFilter, setGenreFilter] = useState("all");
   const [games, setGames] = useState<CatalogGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const [addedIds, setAddedIds] = useState<Set<number>>(() => new Set());
   const [page, setPage] = useState(1);
-  const provider = gameProviders.find((item) => item.id === providerId) ?? gameProviders[0]!;
+  const [selectedGame, setSelectedGame] = useState<CatalogGame | null>(null);
+  const [fitGirlMatch, setFitGirlMatch] = useState<CatalogGame | null>(null);
+  const [checkingFitGirl, setCheckingFitGirl] = useState(false);
+  const availableProviders = gameProviders.filter(
+    (item) => item.id !== "steam-recommendations" || isDesktop,
+  );
+  const provider =
+    availableProviders.find((item) => item.id === providerId) ?? availableProviders[0]!;
+  const categories = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...games.map((game) => game.recommendationCategory).filter(Boolean),
+          ...(providerId === "steam-recommendations" ? ["GOTY winners"] : []),
+        ]),
+      ] as string[],
+    [games, providerId],
+  );
+  const genres = useMemo(
+    () => [...new Set(games.map((game) => game.genre).filter(Boolean))].sort(),
+    [games],
+  );
 
   useEffect(() => setIsDesktop(Boolean(window.nexus)), []);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedGame || providerId !== "steam-recommendations") {
+      setFitGirlMatch(null);
+      return;
+    }
+    setCheckingFitGirl(true);
+    void gameProviders
+      .find((item) => item.id === "fitgirl")!
+      .getGames()
+      .then((catalog) => {
+        const normalize = (value: string) =>
+          value
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+        const wanted = normalize(selectedGame.title);
+        const match = catalog.find((game) => normalize(game.title) === wanted) ?? null;
+        if (active) setFitGirlMatch(match);
+      })
+      .catch(() => {
+        if (active) setFitGirlMatch(null);
+      })
+      .finally(() => {
+        if (active) setCheckingFitGirl(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedGame, providerId]);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +127,8 @@ function Explore() {
     setError(null);
     setAddedIds(new Set());
     setPage(1);
+    setCategoryFilter("all");
+    setGenreFilter("all");
     provider
       .getGames()
       .then((items) => {
@@ -73,13 +148,37 @@ function Explore() {
     };
   }, [provider]);
 
+  useEffect(() => {
+    if (!isDesktop || providerId !== "fitgirl" || loading || error) return;
+    const timer = window.setInterval(() => {
+      void provider
+        .getGames()
+        .then((items) => {
+          setGames((current) => (items.length > current.length ? items : current));
+        })
+        .catch(() => undefined);
+    }, 4_000);
+    return () => window.clearInterval(timer);
+  }, [isDesktop, providerId, loading, error, provider]);
+
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
-    if (!query) return games;
-    return games.filter((game) =>
-      `${game.title} ${game.genre} ${game.developer}`.toLowerCase().includes(query),
-    );
-  }, [q, games]);
+    return games.filter((game) => {
+      const matchesQuery =
+        !query || `${game.title} ${game.genre} ${game.developer}`.toLowerCase().includes(query);
+      const normalizedTitle = game.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+      const matchesCategory =
+        categoryFilter === "all" ||
+        (categoryFilter === "GOTY winners"
+          ? GOTY_WINNERS.has(normalizedTitle)
+          : game.recommendationCategory === categoryFilter);
+      const matchesGenre = genreFilter === "all" || game.genre === genreFilter;
+      return matchesQuery && matchesCategory && matchesGenre;
+    });
+  }, [q, games, categoryFilter, genreFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const currentPage = Math.min(page, totalPages);
@@ -121,13 +220,57 @@ function Explore() {
             <SelectValue placeholder="Choose a provider" />
           </SelectTrigger>
           <SelectContent>
-            {gameProviders.map((item) => (
+            {availableProviders.map((item) => (
               <SelectItem key={item.id} value={item.id}>
                 {item.name}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+
+        {categories.length > 0 && (
+          <Select
+            value={categoryFilter}
+            onValueChange={(value) => {
+              setCategoryFilter(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger aria-label="Recommendation category" className="w-48 rounded-full">
+              <SelectValue placeholder="Recommendation category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All recommendations</SelectItem>
+              {categories.map((category) => (
+                <SelectItem key={category} value={category!}>
+                  {category}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {genres.length > 1 && (
+          <Select
+            value={genreFilter}
+            onValueChange={(value) => {
+              setGenreFilter(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger aria-label="Filter by genre" className="w-44 rounded-full">
+              <SelectValue placeholder="All genres" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All genres</SelectItem>
+              {genres.map((genre) => (
+                <SelectItem key={genre} value={genre}>
+                  {genre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         <label className="flex w-72 items-center gap-2 rounded-full border border-border bg-secondary px-4 py-2 text-sm">
           <Search className="size-4 text-muted-foreground" />
@@ -152,22 +295,11 @@ function Explore() {
 
       <div className="mt-8 grid grid-cols-4 gap-6">
         {pageItems.map((game) => {
-          const isInternal = game.href.startsWith("/");
+          const isSteamRecommendation = providerId === "steam-recommendations";
           const card: ReactNode = (
             <>
               <div className="aspect-video overflow-hidden bg-secondary">
-                {game.cover ? (
-                  <img
-                    src={game.cover}
-                    alt=""
-                    loading="lazy"
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                    No cover
-                  </div>
-                )}
+                <CatalogCover game={game} />
               </div>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -192,7 +324,15 @@ function Explore() {
               key={game.id}
               className="overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/50"
             >
-              {isInternal ? (
+              {isSteamRecommendation ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedGame(game)}
+                  className="group block w-full text-left"
+                >
+                  {card}
+                </button>
+              ) : game.href.startsWith("/") ? (
                 <Link to={game.href as never} className="group block">
                   {card}
                 </Link>
@@ -226,6 +366,46 @@ function Explore() {
           );
         })}
       </div>
+
+      <Dialog open={Boolean(selectedGame)} onOpenChange={(open) => !open && setSelectedGame(null)}>
+        <DialogContent className="max-w-3xl">
+          {selectedGame && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{selectedGame.title}</DialogTitle>
+                <DialogDescription>
+                  {selectedGame.genre} · {selectedGame.developer}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-6 md:grid-cols-[260px_1fr]">
+                {selectedGame.cover && (
+                  <img src={selectedGame.cover} alt="" className="w-full rounded-xl object-cover" />
+                )}
+                <div>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    {selectedGame.description}
+                  </p>
+                  <div className="mt-6 rounded-xl border border-border bg-card p-4">
+                    <p className="font-semibold">FitGirl availability</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {checkingFitGirl
+                        ? "Checking the FitGirl catalog…"
+                        : fitGirlMatch
+                          ? "This game is listed in the FitGirl catalog."
+                          : "This game was not found in the FitGirl catalog."}
+                    </p>
+                    {fitGirlMatch && (
+                      <Button className="mt-4" asChild>
+                        <Link to={fitGirlMatch.href as never}>Open in-app download page</Link>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {loading && (
         <p className="mt-16 text-center text-muted-foreground">
@@ -304,5 +484,50 @@ function Explore() {
         .
       </p>
     </div>
+  );
+}
+
+function CatalogCover({ game }: { game: CatalogGame }) {
+  const [cover, setCover] = useState(game.cover);
+  const [lookedUp, setLookedUp] = useState(false);
+  const imageClass =
+    "h-full w-full object-cover transition-transform duration-300 group-hover:scale-105";
+
+  useEffect(() => {
+    setCover(game.cover);
+    setLookedUp(false);
+  }, [game.id, game.cover]);
+
+  const findCover = useCallback(async () => {
+    if (lookedUp || !game.slug || !window.nexus) return;
+    setLookedUp(true);
+    try {
+      const detail = await window.nexus.getFitGirlGameDetail(game.slug);
+      if (detail.cover && detail.cover !== cover) setCover(detail.cover);
+    } catch {
+      // Keep the card placeholder if the detail page has no usable artwork.
+    }
+  }, [lookedUp, game.slug, cover]);
+
+  useEffect(() => {
+    if (!game.cover && game.slug) void findCover();
+  }, [game.id, game.cover, game.slug, findCover]);
+
+  if (!cover) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        {lookedUp ? "Loading cover…" : "No cover"}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={cover}
+      alt=""
+      loading="lazy"
+      className={imageClass}
+      onError={() => void findCover()}
+    />
   );
 }

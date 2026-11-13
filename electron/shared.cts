@@ -68,6 +68,42 @@ export interface MetadataRecord {
   gameUrl: string;
 }
 
+export interface FitGirlGameSummary {
+  id: string;
+  title: string;
+  cover: string;
+  href: string;
+}
+
+export interface FitGirlTorrent {
+  label: string;
+  url: string;
+}
+
+export interface FitGirlGameDetail {
+  id: string;
+  title: string;
+  cover: string;
+  description: string;
+  genre: string;
+  releaseYear: number | null;
+  developer: string;
+  publisher: string;
+  sizeGB: string | null;
+  torrents: FitGirlTorrent[];
+  screenshots: string[];
+  originalUrl: string;
+}
+
+export interface GameRecommendation {
+  id: string;
+  title: string;
+  category: string;
+  cover: string;
+  href: string;
+  price: string;
+}
+
 export interface TorrentStatus {
   infoHash: string;
   name: string;
@@ -79,6 +115,7 @@ export interface TorrentStatus {
   downloaded: number;
   length: number;
   state: "downloading" | "seeding" | "paused" | "error";
+  savePath: string;
 }
 
 export interface DesktopBridge {
@@ -91,6 +128,7 @@ export interface DesktopBridge {
   addExternalMetadata(input: ExternalMetadataInput): Promise<LibraryGame>;
   updateGame(id: string, details: GameMetadataInput): Promise<LibraryGame>;
   removeGame(id: string): Promise<void>;
+  uninstallGame(id: string): Promise<void>;
   launchGame(id: string): Promise<void>;
   getSettings(): Promise<AppSettings>;
   getStorageInfo(): Promise<StorageInfo>;
@@ -102,8 +140,11 @@ export interface DesktopBridge {
   resumeDownload(id: string): Promise<void>;
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   getMetadataCatalog(): Promise<MetadataRecord[]>;
+  getFitGirlCatalog(): Promise<FitGirlGameSummary[]>;
+  getFitGirlGameDetail(slug: string): Promise<FitGirlGameDetail>;
+  getGameRecommendations(): Promise<GameRecommendation[]>;
   openTorrent(url: string): Promise<void>;
-  
+
   /* BitTorrent Methods */
   startTorrentDownload(url: string, savePath: string): Promise<string>;
   getTorrentStatuses(): Promise<TorrentStatus[]>;
