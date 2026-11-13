@@ -1,5 +1,14 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Gamepad2, LayoutGrid, List, MoreHorizontal, Play, Plus, Search } from "lucide-react";
+import {
+  Gamepad2,
+  Image,
+  LayoutGrid,
+  List,
+  MoreHorizontal,
+  Play,
+  Plus,
+  Search,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -342,6 +351,18 @@ function DesktopLibraryPage() {
     }
   };
 
+  const updateCover = async (game: LibraryGame) => {
+    try {
+      const updated = await window.nexus!.chooseCoverForGame(game.id);
+      setGames((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      if (updated.cover !== game.cover) toast.success(`Cover updated for ${game.title}`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : `Could not update the cover for ${game.title}`,
+      );
+    }
+  };
+
   const launchGame = async (game: LibraryGame) => {
     try {
       await window.nexus!.launchGame(game.id);
@@ -372,7 +393,12 @@ function DesktopLibraryPage() {
       toast.error("Select this game's executable before deleting its files");
       return;
     }
-    if (!window.confirm(`Permanently delete ${game.title} and everything in:\n${game.installPath}\n\nThis cannot be undone.`)) return;
+    if (
+      !window.confirm(
+        `Permanently delete ${game.title} and everything in:\n${game.installPath}\n\nThis cannot be undone.`,
+      )
+    )
+      return;
     try {
       await window.nexus!.uninstallGame(game.id);
       await refresh();
@@ -395,6 +421,9 @@ function DesktopLibraryPage() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={() => setEditingGame(game)}>Edit information</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void updateCover(game)}>
+          <Image className="mr-2 size-4" /> Change cover image
+        </DropdownMenuItem>
         {game.executablePath ? (
           <DropdownMenuItem
             onClick={async () => {
@@ -519,9 +548,17 @@ function DesktopLibraryPage() {
                 size="sm"
                 variant={game.executablePath ? "default" : "secondary"}
                 className="mt-2 rounded-full"
-                onClick={() => game.executablePath ? void launchGame(game) : void updateExecutable(game)}
+                onClick={() =>
+                  game.executablePath ? void launchGame(game) : void updateExecutable(game)
+                }
               >
-                {game.executablePath ? <><Play className="mr-1 size-4" /> Play</> : "Choose game .exe"}
+                {game.executablePath ? (
+                  <>
+                    <Play className="mr-1 size-4" /> Play
+                  </>
+                ) : (
+                  "Choose game .exe"
+                )}
               </Button>
             </div>
           ))}
@@ -544,9 +581,17 @@ function DesktopLibraryPage() {
                 size="sm"
                 variant={game.executablePath ? "default" : "secondary"}
                 className="rounded-full"
-                onClick={() => game.executablePath ? void launchGame(game) : void updateExecutable(game)}
+                onClick={() =>
+                  game.executablePath ? void launchGame(game) : void updateExecutable(game)
+                }
               >
-                {game.executablePath ? <><Play className="mr-1 size-4" /> Play</> : "Choose .exe"}
+                {game.executablePath ? (
+                  <>
+                    <Play className="mr-1 size-4" /> Play
+                  </>
+                ) : (
+                  "Choose .exe"
+                )}
               </Button>
               {menu(game)}
             </div>

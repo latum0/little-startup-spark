@@ -124,6 +124,7 @@ export interface DesktopBridge {
   chooseAndAddGame(): Promise<LibraryGame | null>;
   chooseAndAddGameFromFolder(): Promise<LibraryGame | null>;
   chooseExecutableForGame(id: string): Promise<LibraryGame>;
+  chooseCoverForGame(id: string): Promise<LibraryGame>;
   addMetadataGame(id: number): Promise<LibraryGame>;
   addExternalMetadata(input: ExternalMetadataInput): Promise<LibraryGame>;
   updateGame(id: string, details: GameMetadataInput): Promise<LibraryGame>;

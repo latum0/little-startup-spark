@@ -17,6 +17,10 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("library:set-executable", id) as Promise<
       Awaited<ReturnType<DesktopBridge["chooseExecutableForGame"]>>
     >,
+  chooseCoverForGame: (id) =>
+    ipcRenderer.invoke("library:choose-cover", id) as Promise<
+      Awaited<ReturnType<DesktopBridge["chooseCoverForGame"]>>
+    >,
   addMetadataGame: (id) =>
     ipcRenderer.invoke("library:add-metadata", id) as Promise<
       Awaited<ReturnType<DesktopBridge["addMetadataGame"]>>

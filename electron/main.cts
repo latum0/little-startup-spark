@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import type { IpcMainInvokeEvent, OpenDialogOptions, SaveDialogOptions } from "electron";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import {
   basename,
@@ -482,6 +482,34 @@ function registerIpcHandlers(): void {
   registerHandler("library:update", gameUpdateInput, ({ id, details }) =>
     database.updateGame(id, details),
   );
+  registerHandler("library:choose-cover", gameIdInput, async (id, event) => {
+    const game = database.getGame(id);
+    if (!game) throw new Error("Game not found");
+    const parent = getMainWindow(event);
+    const options: OpenDialogOptions = {
+      title: `Choose cover for ${game.title}`,
+      properties: ["openFile"],
+      filters: [{ name: "Game cover image", extensions: ["jpg", "jpeg", "png", "webp"] }],
+    };
+    const result = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return game;
+    const source = result.filePaths[0];
+    const extension = extname(source).toLowerCase();
+    if (![".jpg", ".jpeg", ".png", ".webp"].includes(extension)) {
+      throw new Error("Choose a JPG, PNG, or WebP image.");
+    }
+    const imageInfo = await stat(source);
+    if (!imageInfo.isFile() || imageInfo.size === 0 || imageInfo.size > 15 * 1024 * 1024) {
+      throw new Error("The cover image must be smaller than 15 MB.");
+    }
+    const filename = `${id}${extension}`;
+    const coverDirectory = join(app.getPath("userData"), "covers");
+    await mkdir(coverDirectory, { recursive: true });
+    await copyFile(source, join(coverDirectory, filename));
+    return database.setCover(id, `${appOrigin}/covers/${filename}`);
+  });
   registerHandler("library:launch", gameIdInput, async (id) => {
     const game = database.getGame(id);
     if (!game?.executablePath || !existsSync(game.executablePath))
