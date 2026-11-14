@@ -21,6 +21,10 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("library:choose-cover", id) as Promise<
       Awaited<ReturnType<DesktopBridge["chooseCoverForGame"]>>
     >,
+  findGameBackground: (id) =>
+    ipcRenderer.invoke("library:find-background", id) as Promise<
+      Awaited<ReturnType<DesktopBridge["findGameBackground"]>>
+    >,
   addMetadataGame: (id) =>
     ipcRenderer.invoke("library:add-metadata", id) as Promise<
       Awaited<ReturnType<DesktopBridge["addMetadataGame"]>>

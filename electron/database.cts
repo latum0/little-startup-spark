@@ -119,6 +119,7 @@ export class NexusDatabase {
         developer TEXT NOT NULL DEFAULT '',
         publisher TEXT NOT NULL DEFAULT '',
         cover TEXT,
+        background_image TEXT,
         executable_path TEXT,
         install_path TEXT,
         last_played_at TEXT,
@@ -146,6 +147,10 @@ export class NexusDatabase {
         expires_at INTEGER NOT NULL
       );
     `);
+    const gameColumns = this.db.prepare("PRAGMA table_info(games)").all();
+    if (!gameColumns.some((column) => column.name === "background_image")) {
+      this.db.exec("ALTER TABLE games ADD COLUMN background_image TEXT");
+    }
     this.db.prepare("UPDATE downloads SET state = 'cancelled' WHERE state = 'downloading'").run();
   }
 
@@ -153,7 +158,8 @@ export class NexusDatabase {
     return this.db
       .prepare(
         `SELECT id, title, description, genre, release_date AS releaseDate,
-      developer, publisher, cover, executable_path AS executablePath, install_path AS installPath,
+      developer, publisher, cover, background_image AS backgroundImage,
+      executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games ORDER BY title COLLATE NOCASE`,
       )
       .all() as unknown as LibraryGame[];
@@ -163,7 +169,8 @@ export class NexusDatabase {
     return this.db
       .prepare(
         `SELECT id, title, description, genre, release_date AS releaseDate,
-      developer, publisher, cover, executable_path AS executablePath, install_path AS installPath,
+      developer, publisher, cover, background_image AS backgroundImage,
+      executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games WHERE id = ?`,
       )
       .get(id) as unknown as LibraryGame | undefined;
@@ -173,10 +180,10 @@ export class NexusDatabase {
     this.db
       .prepare(
         `INSERT INTO games (id, title, description, genre, release_date, developer, publisher,
-      cover, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
-      @releaseDate, @developer, @publisher, @cover, @executablePath, @installPath, @createdAt)`,
+      cover, background_image, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
+      @releaseDate, @developer, @publisher, @cover, @backgroundImage, @executablePath, @installPath, @createdAt)`,
       )
-      .run(game);
+      .run({ ...game, backgroundImage: game.backgroundImage ?? null });
     return game;
   }
 
@@ -191,6 +198,13 @@ export class NexusDatabase {
 
   setCover(id: string, cover: string): LibraryGame {
     this.db.prepare("UPDATE games SET cover = ? WHERE id = ?").run(cover, id);
+    const game = this.getGame(id);
+    if (!game) throw new Error("Game not found");
+    return game;
+  }
+
+  setBackgroundImage(id: string, image: string): LibraryGame {
+    this.db.prepare("UPDATE games SET background_image = ? WHERE id = ?").run(image, id);
     const game = this.getGame(id);
     if (!game) throw new Error("Game not found");
     return game;

@@ -510,6 +510,82 @@ function registerIpcHandlers(): void {
     await copyFile(source, join(coverDirectory, filename));
     return database.setCover(id, `${appOrigin}/covers/${filename}`);
   });
+  registerHandler("library:find-background", gameIdInput, async (id) => {
+    const game = database.getGame(id);
+    if (!game) throw new Error("Game not found");
+    const cleanGameTitle = (value: string) =>
+      value
+        .replace(/\[[^\]]*(?:repack|fitgirl|dodi|version|build)[^\]]*\]/gi, " ")
+        .replace(/\([^)]*(?:repack|fitgirl|dodi|version|build)[^)]*\)/gi, " ")
+        .replace(/\b(?:v(?:ersion)?\s*)?\d+(?:[._-]\d+){1,}\b/gi, " ")
+        .replace(/\b(?:fitgirl|dodi|repack|portable|preinstalled)\b.*$/i, " ")
+        .replace(/\b(?:deluxe|ultimate|complete)\s+edition\b/gi, " ");
+    const normalize = (value: string) =>
+      cleanGameTitle(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+    const wanted = normalize(game.title);
+    const searchTerm = cleanGameTitle(game.title)
+      .replace(/[^a-z0-9 ]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const searchResponse = await fetch(
+      `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(searchTerm || game.title)}&l=english&cc=us`,
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!searchResponse.ok) throw new Error("Steam artwork search is temporarily unavailable.");
+    const search = (await searchResponse.json()) as { items?: { id?: number; name?: string }[] };
+    const candidates = (search.items ?? []).filter(
+      (item): item is { id: number; name: string } =>
+        Number.isInteger(item.id) && Boolean(item.name),
+    );
+    const exact = candidates.find((item) => normalize(item.name) === wanted);
+    const ignoredWords = new Set(["the", "and", "for", "with", "game", "edition", "version"]);
+    const wordsForMatch = (title: string) =>
+      new Set(
+        normalize(title)
+          .split(" ")
+          .filter((word) => word.length > 1 && !ignoredWords.has(word)),
+      );
+    const similarity = (title: string) => {
+      const words = wordsForMatch(title);
+      const target = wordsForMatch(wanted);
+      if (!words.size || !target.size) return 0;
+      const overlap = [...words].filter((word) => target.has(word)).length;
+      const queryCoverage = overlap / target.size;
+      const candidateCoverage = overlap / words.size;
+      return queryCoverage * 0.75 + candidateCoverage * 0.25;
+    };
+    const best = exact ?? candidates.sort((a, b) => similarity(b.name) - similarity(a.name))[0];
+    if (!best || (!exact && similarity(best.name) < 0.72)) {
+      throw new Error("Could not confidently match this title to a Steam game.");
+    }
+    const detailsResponse = await fetch(
+      `https://store.steampowered.com/api/appdetails?appids=${best.id}&cc=us&l=en`,
+      { signal: AbortSignal.timeout(15000) },
+    );
+    if (!detailsResponse.ok) throw new Error("Steam artwork details are temporarily unavailable.");
+    const details = (await detailsResponse.json()) as Record<
+      string,
+      {
+        success?: boolean;
+        data?: {
+          background_raw?: string;
+          background?: string;
+          screenshots?: { path_full?: string }[];
+        };
+      }
+    >;
+    const data = details[String(best.id)]?.data;
+    const imageUrl = data?.screenshots?.[0]?.path_full ?? data?.background_raw ?? data?.background;
+    if (!details[String(best.id)]?.success || !imageUrl) {
+      throw new Error("No landscape artwork is available for this game on Steam.");
+    }
+    const cachedImage = await cacheRemoteArtwork(imageUrl, `background-${game.id}`);
+    if (!cachedImage) throw new Error("Could not download the game's background artwork.");
+    return database.setBackgroundImage(id, cachedImage);
+  });
   registerHandler("library:launch", gameIdInput, async (id) => {
     const game = database.getGame(id);
     if (!game?.executablePath || !existsSync(game.executablePath))

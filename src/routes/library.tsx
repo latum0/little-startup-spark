@@ -363,6 +363,16 @@ function DesktopLibraryPage() {
     }
   };
 
+  const findBackground = async (game: LibraryGame) => {
+    try {
+      const updated = await window.nexus!.findGameBackground(game.id);
+      setGames((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(`High-quality background found for ${game.title}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not find artwork for ${game.title}`);
+    }
+  };
+
   const launchGame = async (game: LibraryGame) => {
     try {
       await window.nexus!.launchGame(game.id);
@@ -424,6 +434,11 @@ function DesktopLibraryPage() {
         <DropdownMenuItem onClick={() => void updateCover(game)}>
           <Image className="mr-2 size-4" /> Change cover image
         </DropdownMenuItem>
+        {game.executablePath && (
+          <DropdownMenuItem onClick={() => void findBackground(game)}>
+            <Image className="mr-2 size-4" /> Find home background
+          </DropdownMenuItem>
+        )}
         {game.executablePath ? (
           <DropdownMenuItem
             onClick={async () => {

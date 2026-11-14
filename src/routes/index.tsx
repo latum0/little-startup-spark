@@ -160,7 +160,9 @@ function DesktopHomePage() {
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [uiSoundsOn, setUiSoundsOn] = useState(true);
   const [ambientOn, setAmbientOn] = useState(false);
+  const [backgroundLoadingId, setBackgroundLoadingId] = useState<string | null>(null);
   const carouselRef = useRef<HTMLDivElement>(null);
+  const backgroundLookups = useRef(new Set<string>());
 
   useEffect(() => {
     if (!ambientOn) return;
@@ -190,6 +192,28 @@ function DesktopHomePage() {
     library.find((game) => game.id === focusedId) ??
     library.find((game) => game.executablePath) ??
     library[0];
+  const featuredBackground = featured?.backgroundImage || featured?.cover;
+  const featuredId = featured?.id;
+  const featuredBackgroundImage = featured?.backgroundImage;
+  const featuredExecutablePath = featured?.executablePath;
+
+  useEffect(() => {
+    if (!featuredId || !featuredExecutablePath || featuredBackgroundImage || !window.nexus) return;
+    if (backgroundLookups.current.has(featuredId)) return;
+    backgroundLookups.current.add(featuredId);
+    const gameId = featuredId;
+    setBackgroundLoadingId(gameId);
+    void window.nexus
+      .findGameBackground(gameId)
+      .then((updated) => {
+        setLibrary((current) => current.map((game) => (game.id === updated.id ? updated : game)));
+        toast.success(`Home background updated for ${updated.title}`);
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Could not find game background art");
+      })
+      .finally(() => setBackgroundLoadingId(null));
+  }, [featuredId, featuredExecutablePath, featuredBackgroundImage]);
   const launch = useCallback(
     async (game: LibraryGame) => {
       try {
@@ -323,20 +347,20 @@ function DesktopHomePage() {
           </Link>
         </div>
       </header>
-      {featured?.cover && (
+      {featuredBackground && (
         <img
           key={featured.id}
-          src={featured.cover}
+          src={featuredBackground}
           alt=""
           className="fixed inset-0 z-0 h-screen w-screen scale-105 object-cover opacity-65 blur-[2px] animate-in fade-in duration-700"
         />
       )}
       <div className="fixed inset-0 z-0 bg-gradient-to-b from-background/30 via-background/45 to-background/90" />
       <section className="relative z-10 order-2 flex min-h-[360px] flex-1 items-end px-12 pb-10 pt-8">
-        {featured?.cover && (
+        {featuredBackground && (
           <img
             key={`hero-${featured.id}`}
-            src={featured.cover}
+            src={featuredBackground}
             alt=""
             className="absolute inset-0 h-full w-full object-cover object-center opacity-55 animate-in fade-in duration-700"
           />
@@ -345,7 +369,7 @@ function DesktopHomePage() {
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/25 to-transparent" />
         <div className="relative z-10 max-w-2xl animate-in fade-in slide-in-from-bottom-3 duration-500">
           <p className="text-xs font-semibold tracking-[0.32em] text-primary uppercase">
-            Play your way
+            {backgroundLoadingId === featured?.id ? "Finding game artwork…" : "Play your way"}
           </p>
           <h1 className="mt-4 font-display text-5xl font-bold leading-tight drop-shadow-lg md:text-7xl">
             {loading ? "Loading your games…" : (featured?.title ?? "Welcome to NEXUS")}
