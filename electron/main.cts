@@ -24,6 +24,7 @@ import initSqlJs from "sql.js";
 import type WebTorrent from "webtorrent";
 import { NexusDatabase } from "./database.cjs";
 import { FitGirlCatalog } from "./fitgirl.cjs";
+import { isConfidentSteamMatch, rankSteamSearchResults } from "./artwork.js";
 import type {
   AppSettings,
   DownloadItem,
@@ -272,7 +273,7 @@ async function cacheRemoteArtwork(rawUrl: string, key: string): Promise<string |
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== "https:") return null;
-    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const response = await net.fetch(url.toString(), { signal: AbortSignal.timeout(15000) });
     const contentType = response.headers.get("content-type") ?? "";
     if (!response.ok || !contentType.startsWith("image/")) return null;
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -510,82 +511,140 @@ function registerIpcHandlers(): void {
     await copyFile(source, join(coverDirectory, filename));
     return database.setCover(id, `${appOrigin}/covers/${filename}`);
   });
-  registerHandler("library:find-background", gameIdInput, async (id) => {
+  registerHandler("library:choose-background", gameIdInput, async (id, event) => {
     const game = database.getGame(id);
     if (!game) throw new Error("Game not found");
-    const cleanGameTitle = (value: string) =>
-      value
-        .replace(/\[[^\]]*(?:repack|fitgirl|dodi|version|build)[^\]]*\]/gi, " ")
-        .replace(/\([^)]*(?:repack|fitgirl|dodi|version|build)[^)]*\)/gi, " ")
-        .replace(/\b(?:v(?:ersion)?\s*)?\d+(?:[._-]\d+){1,}\b/gi, " ")
-        .replace(/\b(?:fitgirl|dodi|repack|portable|preinstalled)\b.*$/i, " ")
-        .replace(/\b(?:deluxe|ultimate|complete)\s+edition\b/gi, " ");
-    const normalize = (value: string) =>
-      cleanGameTitle(value)
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, " ")
-        .trim();
-    const wanted = normalize(game.title);
-    const searchTerm = cleanGameTitle(game.title)
-      .replace(/[^a-z0-9 ]/gi, " ")
+    const parent = getMainWindow(event);
+    const options: OpenDialogOptions = {
+      title: `Choose home background for ${game.title}`,
+      properties: ["openFile"],
+      filters: [{ name: "Landscape image", extensions: ["jpg", "jpeg", "png", "webp"] }],
+    };
+    const result = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return game;
+    const source = result.filePaths[0];
+    const extension = extname(source).toLowerCase();
+    if (![".jpg", ".jpeg", ".png", ".webp"].includes(extension)) {
+      throw new Error("Choose a JPG, PNG, or WebP image.");
+    }
+    const imageInfo = await stat(source);
+    if (!imageInfo.isFile() || imageInfo.size === 0 || imageInfo.size > 15 * 1024 * 1024) {
+      throw new Error("The background image must be smaller than 15 MB.");
+    }
+    const filename = `background-custom-${id}${extension}`;
+    const artworkDirectory = join(app.getPath("userData"), "covers");
+    await mkdir(artworkDirectory, { recursive: true });
+    await copyFile(source, join(artworkDirectory, filename));
+    return database.setBackgroundImage(id, `${appOrigin}/covers/${filename}`);
+  });
+  const findSteamArtwork = async (gameId: string, kind: "cover" | "background") => {
+    const game = database.getGame(gameId);
+    if (!game) throw new Error("Game not found");
+    const cleanedTitle = game.title
+      .replace(/\[[^\]]*(?:repack|fitgirl|dodi|version|build)[^\]]*\]/gi, " ")
+      .replace(/\([^)]*(?:repack|fitgirl|dodi|version|build)[^)]*\)/gi, " ")
+      .replace(/\b(?:fitgirl|dodi|repack|portable|preinstalled)\b.*$/i, " ")
+      .replace(/\b(?:deluxe|ultimate|complete|definitive|goty)\s+edition\b/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
-    const searchResponse = await fetch(
-      `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(searchTerm || game.title)}&l=english&cc=us`,
-      { signal: AbortSignal.timeout(15000) },
-    );
-    if (!searchResponse.ok) throw new Error("Steam artwork search is temporarily unavailable.");
-    const search = (await searchResponse.json()) as { items?: { id?: number; name?: string }[] };
-    const candidates = (search.items ?? []).filter(
-      (item): item is { id: number; name: string } =>
-        Number.isInteger(item.id) && Boolean(item.name),
-    );
-    const exact = candidates.find((item) => normalize(item.name) === wanted);
-    const ignoredWords = new Set(["the", "and", "for", "with", "game", "edition", "version"]);
-    const wordsForMatch = (title: string) =>
-      new Set(
-        normalize(title)
-          .split(" ")
-          .filter((word) => word.length > 1 && !ignoredWords.has(word)),
-      );
-    const similarity = (title: string) => {
-      const words = wordsForMatch(title);
-      const target = wordsForMatch(wanted);
-      if (!words.size || !target.size) return 0;
-      const overlap = [...words].filter((word) => target.has(word)).length;
-      const queryCoverage = overlap / target.size;
-      const candidateCoverage = overlap / words.size;
-      return queryCoverage * 0.75 + candidateCoverage * 0.25;
-    };
-    const best = exact ?? candidates.sort((a, b) => similarity(b.name) - similarity(a.name))[0];
-    if (!best || (!exact && similarity(best.name) < 0.72)) {
-      throw new Error("Could not confidently match this title to a Steam game.");
-    }
-    const detailsResponse = await fetch(
-      `https://store.steampowered.com/api/appdetails?appids=${best.id}&cc=us&l=en`,
-      { signal: AbortSignal.timeout(15000) },
-    );
-    if (!detailsResponse.ok) throw new Error("Steam artwork details are temporarily unavailable.");
-    const details = (await detailsResponse.json()) as Record<
-      string,
-      {
-        success?: boolean;
-        data?: {
-          background_raw?: string;
-          background?: string;
-          screenshots?: { path_full?: string }[];
-        };
+    const searchTerms = [...new Set([cleanedTitle, game.title].filter(Boolean))];
+    const searchResults: { id?: number; name?: string }[] = [];
+    let reachedSteam = false;
+    for (const term of searchTerms) {
+      try {
+        const response = await net.fetch(
+          `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(term)}&l=english&cc=us`,
+          { signal: AbortSignal.timeout(12000) },
+        );
+        if (!response.ok) continue;
+        reachedSteam = true;
+        const payload = (await response.json()) as { items?: { id?: number; name?: string }[] };
+        searchResults.push(...(payload.items ?? []));
+      } catch {
+        // Try the next title variant.
       }
-    >;
-    const data = details[String(best.id)]?.data;
-    const imageUrl = data?.screenshots?.[0]?.path_full ?? data?.background_raw ?? data?.background;
-    if (!details[String(best.id)]?.success || !imageUrl) {
-      throw new Error("No landscape artwork is available for this game on Steam.");
     }
-    const cachedImage = await cacheRemoteArtwork(imageUrl, `background-${game.id}`);
-    if (!cachedImage) throw new Error("Could not download the game's background artwork.");
-    return database.setBackgroundImage(id, cachedImage);
-  });
+    const ranked = rankSteamSearchResults(game.title, searchResults).slice(0, 8);
+    const candidate = ranked.find((result) => isConfidentSteamMatch(result.score, game.title));
+    if (!candidate) {
+      try {
+        const fitGirlGames = await fitGirlCatalog.getCatalog();
+        const fitGirlMatches = rankSteamSearchResults(
+          game.title,
+          fitGirlGames.map((item, index) => ({ id: index + 1, name: item.title })),
+        );
+        const fitGirlMatch = fitGirlMatches.find((item) => isConfidentSteamMatch(item.score, game.title));
+        const summary = fitGirlMatch
+          ? fitGirlGames.find((item) => item.title === fitGirlMatch.name)
+          : undefined;
+        if (summary) {
+          const urls = kind === "cover"
+            ? [summary.cover]
+            : (await fitGirlCatalog.getGameDetail(summary.id)).screenshots;
+          for (const url of urls.filter(Boolean)) {
+            const cached = await cacheRemoteArtwork(url, `${kind}-${game.id}`);
+            if (cached) {
+              return kind === "cover"
+                ? database.setCover(gameId, cached)
+                : database.setBackgroundImage(gameId, cached);
+            }
+          }
+        }
+      } catch {
+        // The secondary, unsigned source is best-effort; keep the actionable Steam error.
+      }
+      if (!ranked.length) {
+        throw new Error(reachedSteam
+          ? "Steam couldn't find this game and FitGirl had no matching artwork. Try the game's full store title, or choose an image from your device."
+          : "Steam artwork search could not be reached. Check your connection and try again, or choose an image from your device.");
+      }
+      throw new Error(`Steam returned similar titles (${ranked.slice(0, 3).map((r) => r.name).join(", ")}) but none were a safe match. Edit the library title to the game's store title and retry.`);
+    }
+    for (const result of ranked.filter((item) => item.score >= candidate.score - 0.2).slice(0, 5)) {
+      try {
+        const response = await net.fetch(
+          `https://store.steampowered.com/api/appdetails?appids=${result.id}&cc=us&l=en`,
+          { signal: AbortSignal.timeout(12000) },
+        );
+        if (!response.ok) continue;
+        const details = (await response.json()) as Record<string, {
+          success?: boolean;
+          data?: {
+            background_raw?: string;
+            background?: string;
+            header_image?: string;
+            library_capsule?: string;
+            screenshots?: { path_full?: string }[];
+          };
+        }>;
+        const data = details[String(result.id)];
+        if (!data?.success) continue;
+        const urls = kind === "cover"
+          ? [data.data?.library_capsule, data.data?.header_image,
+              `https://cdn.akamai.steamstatic.com/steam/apps/${result.id}/library_600x900.jpg`,
+              `https://cdn.akamai.steamstatic.com/steam/apps/${result.id}/header.jpg`]
+          : [data.data?.background_raw, data.data?.background,
+              ...(data.data?.screenshots ?? []).map((shot) => shot.path_full),
+              `https://cdn.akamai.steamstatic.com/steam/apps/${result.id}/library_hero.jpg`,
+              data.data?.header_image];
+        for (const url of [...new Set(urls.filter((value): value is string => Boolean(value)))]) {
+          const cached = await cacheRemoteArtwork(url, `${kind}-${game.id}`);
+          if (cached) {
+            return kind === "cover"
+              ? database.setCover(gameId, cached)
+              : database.setBackgroundImage(gameId, cached);
+          }
+        }
+      } catch {
+        // Incomplete Steam data or one unavailable image should not end the search.
+      }
+    }
+    throw new Error(`Steam matched ${candidate.name} but didn't provide a downloadable ${kind} image. You can choose one from your device.`);
+  };
+  registerHandler("library:find-cover", gameIdInput, (id) => findSteamArtwork(id, "cover"));
+  registerHandler("library:find-background", gameIdInput, (id) => findSteamArtwork(id, "background"));
   registerHandler("library:launch", gameIdInput, async (id) => {
     const game = database.getGame(id);
     if (!game?.executablePath || !existsSync(game.executablePath))

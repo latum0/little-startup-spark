@@ -130,10 +130,11 @@ function MockLibraryPage() {
                 params={{ id: game.id }}
                 className="block overflow-hidden rounded-2xl border border-border transition-all group-hover:focus-glow"
               >
-                <img
+                <ArtworkImage
                   src={game.cover}
-                  alt={game.title}
+                  title={game.title}
                   className="aspect-[3/4] w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  placeholderClassName="aspect-[3/4] w-full"
                 />
               </Link>
               <div className="absolute top-3 right-3">{menu(game.id, game.title)}</div>
@@ -148,7 +149,12 @@ function MockLibraryPage() {
         <div className="mt-8 divide-y divide-border rounded-2xl border border-border bg-card">
           {list.map(({ game, lastPlayed, location }) => (
             <div key={game.id} className="flex items-center gap-5 p-4">
-              <img src={game.cover} alt="" className="h-14 w-24 rounded-lg object-cover" />
+              <ArtworkImage
+                src={game.cover}
+                title={game.title}
+                className="h-14 w-24 shrink-0 rounded-lg object-cover"
+                placeholderClassName="h-14 w-24 shrink-0 rounded-lg aspect-auto"
+              />
               <div className="flex-1">
                 <p className="font-display font-semibold">{game.title}</p>
                 <p className="text-xs text-muted-foreground">{location}</p>
@@ -160,6 +166,42 @@ function MockLibraryPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ArtworkImage({
+  src,
+  title,
+  className,
+  placeholderClassName,
+}: {
+  src: string | null;
+  title: string;
+  className: string;
+  placeholderClassName: string;
+}) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  useEffect(() => setFailedSrc(null), [src]);
+  if (!src || failedSrc === src) {
+    return <ArtworkPlaceholder title={title} className={placeholderClassName} />;
+  }
+  return <img src={src} alt={title} className={className} onError={() => setFailedSrc(src)} />;
+}
+
+function ArtworkPlaceholder({ title, className = "" }: { title: string; className?: string }) {
+  return (
+    <div
+      aria-label={`No cover art for ${title}`}
+      className={`grid place-items-center bg-gradient-to-br from-primary/25 via-secondary to-background p-4 text-center ${className}`}
+    >
+      <div>
+        <Gamepad2 className="mx-auto mb-3 size-8 text-primary/80" />
+        <span className="line-clamp-3 text-sm font-semibold text-foreground/80">{title}</span>
+        <span className="mt-2 block text-[10px] uppercase tracking-widest text-muted-foreground">
+          Choose cover
+        </span>
+      </div>
     </div>
   );
 }
@@ -373,6 +415,30 @@ function DesktopLibraryPage() {
     }
   };
 
+  const findCover = async (game: LibraryGame) => {
+    try {
+      const updated = await window.nexus!.findGameCover(game.id);
+      setGames((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(`Cover found for ${game.title}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not find a cover for ${game.title}`);
+    }
+  };
+
+  const updateBackground = async (game: LibraryGame) => {
+    try {
+      const updated = await window.nexus!.chooseBackgroundForGame(game.id);
+      setGames((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      if (updated.backgroundImage !== game.backgroundImage) {
+        toast.success(`Home background updated for ${game.title}`);
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : `Could not update ${game.title}'s background`,
+      );
+    }
+  };
+
   const launchGame = async (game: LibraryGame) => {
     try {
       await window.nexus!.launchGame(game.id);
@@ -434,11 +500,15 @@ function DesktopLibraryPage() {
         <DropdownMenuItem onClick={() => void updateCover(game)}>
           <Image className="mr-2 size-4" /> Change cover image
         </DropdownMenuItem>
-        {game.executablePath && (
-          <DropdownMenuItem onClick={() => void findBackground(game)}>
-            <Image className="mr-2 size-4" /> Find home background
-          </DropdownMenuItem>
-        )}
+        <DropdownMenuItem onClick={() => void findCover(game)}>
+          <Image className="mr-2 size-4" /> Find cover automatically
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void findBackground(game)}>
+          <Image className="mr-2 size-4" /> Find home background
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void updateBackground(game)}>
+          <Image className="mr-2 size-4" /> Choose home background…
+        </DropdownMenuItem>
         {game.executablePath ? (
           <DropdownMenuItem
             onClick={async () => {
@@ -575,6 +645,14 @@ function DesktopLibraryPage() {
                   "Choose game .exe"
                 )}
               </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-2 rounded-full"
+                onClick={() => void findCover(game)}
+              >
+                <Image className="mr-1 size-4" /> Find cover
+              </Button>
             </div>
           ))}
         </div>
@@ -607,6 +685,9 @@ function DesktopLibraryPage() {
                 ) : (
                   "Choose .exe"
                 )}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => void findCover(game)}>
+                <Image className="mr-1 size-4" /> Find cover
               </Button>
               {menu(game)}
             </div>

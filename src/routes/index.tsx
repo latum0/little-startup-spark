@@ -161,6 +161,7 @@ function DesktopHomePage() {
   const [uiSoundsOn, setUiSoundsOn] = useState(true);
   const [ambientOn, setAmbientOn] = useState(false);
   const [backgroundLoadingId, setBackgroundLoadingId] = useState<string | null>(null);
+  const [failedBackgroundId, setFailedBackgroundId] = useState<string | null>(null);
   const carouselRef = useRef<HTMLDivElement>(null);
   const backgroundLookups = useRef(new Set<string>());
 
@@ -192,13 +193,15 @@ function DesktopHomePage() {
     library.find((game) => game.id === focusedId) ??
     library.find((game) => game.executablePath) ??
     library[0];
-  const featuredBackground = featured?.backgroundImage || featured?.cover;
+  const featuredBackground =
+    failedBackgroundId === featured?.id
+      ? featured?.cover
+      : featured?.backgroundImage || featured?.cover;
   const featuredId = featured?.id;
   const featuredBackgroundImage = featured?.backgroundImage;
-  const featuredExecutablePath = featured?.executablePath;
 
   useEffect(() => {
-    if (!featuredId || !featuredExecutablePath || featuredBackgroundImage || !window.nexus) return;
+    if (!featuredId || featuredBackgroundImage || !window.nexus) return;
     if (backgroundLookups.current.has(featuredId)) return;
     backgroundLookups.current.add(featuredId);
     const gameId = featuredId;
@@ -213,7 +216,7 @@ function DesktopHomePage() {
         toast.error(error instanceof Error ? error.message : "Could not find game background art");
       })
       .finally(() => setBackgroundLoadingId(null));
-  }, [featuredId, featuredExecutablePath, featuredBackgroundImage]);
+  }, [featuredId, featuredBackgroundImage]);
   const launch = useCallback(
     async (game: LibraryGame) => {
       try {
@@ -353,6 +356,7 @@ function DesktopHomePage() {
           src={featuredBackground}
           alt=""
           className="fixed inset-0 z-0 h-screen w-screen scale-105 object-cover opacity-65 blur-[2px] animate-in fade-in duration-700"
+          onError={() => setFailedBackgroundId(featured.id)}
         />
       )}
       <div className="fixed inset-0 z-0 bg-gradient-to-b from-background/30 via-background/45 to-background/90" />
@@ -363,45 +367,74 @@ function DesktopHomePage() {
             src={featuredBackground}
             alt=""
             className="absolute inset-0 h-full w-full object-cover object-center opacity-55 animate-in fade-in duration-700"
+            onError={() => setFailedBackgroundId(featured.id)}
           />
         )}
         <div className="absolute inset-0 scrim-left" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/25 to-transparent" />
-        <div className="relative z-10 max-w-2xl animate-in fade-in slide-in-from-bottom-3 duration-500">
-          <p className="text-xs font-semibold tracking-[0.32em] text-primary uppercase">
-            {backgroundLoadingId === featured?.id ? "Finding game artwork…" : "Play your way"}
-          </p>
-          <h1 className="mt-4 font-display text-5xl font-bold leading-tight drop-shadow-lg md:text-7xl">
-            {loading ? "Loading your games…" : (featured?.title ?? "Welcome to NEXUS")}
-          </h1>
-          <p className="mt-3 text-sm text-foreground/80">
-            {featured
-              ? [featured.genre, featured.developer].filter(Boolean).join(" · ")
-              : "Your games, ready when you are."}
-          </p>
-          <p className="mt-3 line-clamp-2 max-w-xl text-base text-foreground/85">
-            {featured?.description ||
-              (library.length
-                ? "Choose an executable in your library to launch this game."
-                : "Add a game you already own, or explore game information from a provider.")}
-          </p>
-          <div className="mt-7 flex gap-3">
-            {featured?.executablePath ? (
-              <Button size="lg" className="rounded-full px-8" onClick={() => void launch(featured)}>
-                <Play className="fill-current" /> Play
-              </Button>
-            ) : (
+        <div className="relative z-10 flex w-full items-end gap-8 animate-in fade-in slide-in-from-bottom-3 duration-500">
+          {featured?.cover ? (
+            <img
+              src={featured.cover}
+              alt={`${featured.title} cover`}
+              className="hidden aspect-[2/3] w-40 shrink-0 rounded-xl border border-white/15 object-cover shadow-2xl lg:block"
+              onError={(event) => {
+                event.currentTarget.style.visibility = "hidden";
+              }}
+            />
+          ) : (
+            featured && (
+              <div className="hidden aspect-[2/3] w-40 shrink-0 place-items-center rounded-xl border border-white/15 bg-gradient-to-br from-primary/40 via-secondary to-background text-center shadow-2xl lg:grid">
+                <div className="p-3">
+                  <Gamepad2 className="mx-auto mb-3 size-9 text-primary" />
+                  <span className="line-clamp-4 text-sm font-semibold">{featured.title}</span>
+                  <span className="mt-2 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                    No cover yet
+                  </span>
+                </div>
+              </div>
+            )
+          )}
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold tracking-[0.32em] text-primary uppercase">
+              {backgroundLoadingId === featured?.id ? "Finding game artwork…" : "Play your way"}
+            </p>
+            <h1 className="mt-4 font-display text-5xl font-bold leading-tight drop-shadow-lg md:text-7xl">
+              {loading ? "Loading your games…" : (featured?.title ?? "Welcome to NEXUS")}
+            </h1>
+            <p className="mt-3 text-sm text-foreground/80">
+              {featured
+                ? [featured.genre, featured.developer].filter(Boolean).join(" · ")
+                : "Your games, ready when you are."}
+            </p>
+            <p className="mt-3 line-clamp-2 max-w-xl text-base text-foreground/85">
+              {featured?.description ||
+                (library.length
+                  ? "Choose an executable in your library to launch this game."
+                  : "Add a game you already own, or explore game information from a provider.")}
+            </p>
+            <div className="mt-7 flex gap-3">
+              {featured?.executablePath ? (
+                <Button
+                  size="lg"
+                  className="rounded-full px-8"
+                  onClick={() => void launch(featured)}
+                >
+                  <Play className="fill-current" /> Play
+                </Button>
+              ) : (
+                <Button size="lg" variant="secondary" className="rounded-full px-6" asChild>
+                  <Link to="/library">
+                    <Gamepad2 /> Set up a game
+                  </Link>
+                </Button>
+              )}
               <Button size="lg" variant="secondary" className="rounded-full px-6" asChild>
-                <Link to="/library">
-                  <Gamepad2 /> Set up a game
+                <Link to="/explore">
+                  <Info /> Explore
                 </Link>
               </Button>
-            )}
-            <Button size="lg" variant="secondary" className="rounded-full px-6" asChild>
-              <Link to="/explore">
-                <Info /> Explore
-              </Link>
-            </Button>
+            </div>
           </div>
         </div>
       </section>
