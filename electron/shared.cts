@@ -157,7 +157,7 @@ export interface DesktopBridge {
   openTorrent(url: string): Promise<void>;
 
   /* BitTorrent Methods */
-  startTorrentDownload(url: string, savePath: string): Promise<string>;
+  startTorrentDownload(url: string, savePath: string, gameTitle: string): Promise<string>;
   getTorrentStatuses(): Promise<TorrentStatus[]>;
   pauseTorrent(infoHash: string): Promise<void>;
   resumeTorrent(infoHash: string): Promise<void>;

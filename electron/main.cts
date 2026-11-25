@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import type { IpcMainInvokeEvent, OpenDialogOptions, SaveDialogOptions } from "electron";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import {
   basename,
@@ -12,6 +12,7 @@ import {
   parse,
   relative,
   resolve,
+  resolve as resolvePath,
   sep,
 } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -24,6 +25,7 @@ import initSqlJs from "sql.js";
 import type WebTorrent from "webtorrent";
 import { NexusDatabase } from "./database.cjs";
 import { FitGirlCatalog } from "./fitgirl.cjs";
+import { removeCompletedRepack, safeGameFolderName } from "./installer-cleanup.cjs";
 import { isConfidentSteamMatch, rankSteamSearchResults } from "./artwork.js";
 import type {
   AppSettings,
@@ -124,30 +126,12 @@ const torrentUrlInput = z
 const torrentAddInput = z.object({
   url: torrentUrlInput,
   savePath: z.string().min(1).max(2048),
+  gameTitle: z.string().trim().min(1).max(200),
 });
 
 function defaultSettings(): AppSettings {
   const root = join(app.getPath("home"), "Games", "NEXUS");
   return { downloadDirectory: join(app.getPath("downloads"), "NEXUS"), installDirectory: root };
-}
-
-function safeGameFolderName(title: string): string {
-  const safe = title
-    .replace(/[<>:"/\\|?*]+/g, "")
-    .trim()
-    .replace(/[. ]+$/g, "");
-  return safe && safe !== "." && safe !== ".." ? safe : "Game";
-}
-
-async function containsSetupExecutable(folder: string, depth = 0): Promise<boolean> {
-  if (depth > 2) return false;
-  const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (entry.isFile() && entry.name.toLowerCase() === "setup.exe") return true;
-    if (entry.isDirectory() && (await containsSetupExecutable(join(folder, entry.name), depth + 1)))
-      return true;
-  }
-  return false;
 }
 
 async function initializeDatabase(): Promise<void> {
@@ -420,6 +404,74 @@ async function startDownload(id: string): Promise<void> {
   }
 }
 
+function removeRepackAfterInstallerSuccess(savePath: string, setupPath: string, gameTitle: string): void {
+  void removeCompletedRepack(savePath, setupPath, gameTitle)
+    .then((removed) => {
+      if (removed) console.info(`Removed completed repack files for ${gameTitle}`);
+      else console.warn(`Kept repack files for ${gameTitle}: cleanup path was not safe to remove.`);
+    })
+    .catch((error) => console.error(`Could not remove repack files for ${gameTitle}:`, error));
+}
+
+function monitorInstallerProcess(
+  installer: ReturnType<typeof spawn>,
+  setupPath: string,
+  savePath: string,
+  gameTitle: string,
+  onLaunchError?: (error: Error) => void,
+): void {
+  let handled = false;
+  installer.once("error", (error) => {
+    if (handled) return;
+    handled = true;
+    onLaunchError?.(error);
+  });
+  installer.once("close", (code, signal) => {
+    if (handled) return;
+    handled = true;
+    if (code === 0 && !signal) {
+      removeRepackAfterInstallerSuccess(savePath, setupPath, gameTitle);
+    } else {
+      console.info(
+        `Kept repack files for ${gameTitle}; installer exited with code ${code ?? "none"}${signal ? ` (${signal})` : ""}.`,
+      );
+    }
+  });
+}
+
+function launchSetupAndTrackCompletion(setupPath: string, savePath: string, gameTitle: string): void {
+  const installer = spawn(setupPath, [], {
+    cwd: dirname(setupPath),
+    stdio: "ignore",
+    windowsHide: false,
+  });
+  monitorInstallerProcess(installer, setupPath, savePath, gameTitle, (error) => {
+    console.warn(`Could not launch ${gameTitle} setup directly; retrying with elevation:`, error);
+    const elevatedInstaller = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$installer = Start-Process -FilePath $env:NEXUS_SETUP_PATH -WorkingDirectory $env:NEXUS_SETUP_CWD -Verb RunAs -Wait -PassThru; exit $installer.ExitCode",
+      ],
+      {
+        cwd: dirname(setupPath),
+        env: {
+          ...process.env,
+          NEXUS_SETUP_PATH: setupPath,
+          NEXUS_SETUP_CWD: dirname(setupPath),
+        },
+        stdio: "ignore",
+        windowsHide: true,
+      },
+    );
+    monitorInstallerProcess(elevatedInstaller, setupPath, savePath, gameTitle, (fallbackError) => {
+      console.error(`Could not start ${gameTitle} setup:`, fallbackError);
+    });
+  });
+}
+
 function registerIpcHandlers(): void {
   registerHandler("app:version", noInput, () => app.getVersion());
   registerHandler("library:list", noInput, () => database.getGames());
@@ -465,24 +517,7 @@ function registerIpcHandlers(): void {
     if (!game) throw new Error("Game not found");
     const executable = await selectExecutable(getMainWindow(event));
     if (!executable) throw new Error("Executable selection was cancelled.");
-    const updated = database.setExecutable(id, executable, dirname(executable));
-    const settings = database.getSettings(defaultSettings());
-    const repackFolder = resolve(settings.downloadDirectory, safeGameFolderName(game.title));
-    const downloadRoot = resolve(settings.downloadDirectory);
-    const relativeRepack = relative(downloadRoot, repackFolder);
-    if (
-      relativeRepack &&
-      relativeRepack !== ".." &&
-      !relativeRepack.startsWith(`..${sep}`) &&
-      !isAbsolute(relativeRepack) &&
-      !resolve(executable).startsWith(`${repackFolder}${sep}`) &&
-      (await containsSetupExecutable(repackFolder))
-    ) {
-      await rm(repackFolder, { recursive: true, force: true }).catch((error) => {
-        console.warn(`Could not remove completed repack folder ${repackFolder}:`, error);
-      });
-    }
-    return updated;
+    return database.setExecutable(id, executable, dirname(executable));
   });
   registerHandler("library:remove", gameIdInput, (id) => database.removeGame(id));
   registerHandler("library:uninstall", gameIdInput, async (id) => {
@@ -1007,15 +1042,23 @@ function registerIpcHandlers(): void {
 
   /* ─────────────── BitTorrent Handlers ─────────────── */
 
-  registerHandler("torrents:add", torrentAddInput, async ({ url, savePath }) => {
-    await mkdir(savePath, { recursive: true });
+  registerHandler("torrents:add", torrentAddInput, async ({ url, savePath, gameTitle }) => {
+    const resolvedSavePath = resolve(savePath);
+    if (
+      resolvedSavePath === parse(resolvedSavePath).root ||
+      basename(resolvedSavePath).toLocaleLowerCase() !==
+        safeGameFolderName(gameTitle).toLocaleLowerCase()
+    ) {
+      throw new Error("Choose a dedicated folder for this game's download.");
+    }
+    await mkdir(resolvedSavePath, { recursive: true });
     return new Promise<string>((resolve, reject) => {
-      const torrent = torrentClient.add(url, { path: savePath });
+      const torrent = torrentClient.add(url, { path: resolvedSavePath });
       torrent.once("done", () => {
         const setup = torrent.files.find(
           (file) => basename(file.path).toLowerCase() === "setup.exe",
         );
-        const setupPath = setup ? join(savePath, setup.path) : null;
+        const setupPath = setup ? resolvePath(resolvedSavePath, setup.path) : null;
         // A completed torrent should not keep uploading. Close WebTorrent's chunk
         // store while preserving the downloaded files so setup can inspect them.
         torrent.destroy({}, (closeError) => {
@@ -1024,9 +1067,7 @@ function registerIpcHandlers(): void {
             return;
           }
           if (!setupPath) return;
-          void shell.openPath(setupPath).then((error) => {
-            if (error) console.error(`Could not open game setup: ${error}`);
-          });
+          launchSetupAndTrackCompletion(setupPath, resolvedSavePath, gameTitle);
         });
       });
       let settled = false;

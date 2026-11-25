@@ -94,7 +94,7 @@ function FitGirlGameDetails() {
       const safeTitle = detail.title.replace(/[<>:"/\\|?*]+/g, "").trim().replace(/[. ]+$/g, "") || "Game";
       const savePath = `${destination}\\${safeTitle}`;
 
-      const hash = await window.nexus.startTorrentDownload(torrent.url, savePath);
+      const hash = await window.nexus.startTorrentDownload(torrent.url, savePath, detail.title);
       setInfoHash(hash);
       const added = await window.nexus.addExternalMetadata({
         title: detail.title,

@@ -113,8 +113,8 @@ const bridge: DesktopBridge = {
   openTorrent: (url) => ipcRenderer.invoke("torrents:open", url) as Promise<void>,
 
   /* BitTorrent Methods */
-  startTorrentDownload: (url, savePath) =>
-    ipcRenderer.invoke("torrents:add", { url, savePath }) as Promise<string>,
+  startTorrentDownload: (url, savePath, gameTitle) =>
+    ipcRenderer.invoke("torrents:add", { url, savePath, gameTitle }) as Promise<string>,
   getTorrentStatuses: () => ipcRenderer.invoke("torrents:list") as Promise<TorrentStatus[]>,
   pauseTorrent: (infoHash) => ipcRenderer.invoke("torrents:pause", infoHash) as Promise<void>,
   resumeTorrent: (infoHash) => ipcRenderer.invoke("torrents:resume", infoHash) as Promise<void>,
