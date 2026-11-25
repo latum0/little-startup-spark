@@ -34,6 +34,9 @@ const GOTY_WINNERS = new Set([
 ]);
 
 export const Route = createFileRoute("/explore")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : "",
+  }),
   head: () => ({
     meta: [
       { title: "Explore · NEXUS" },
@@ -55,7 +58,8 @@ function getPageNumbers(current: number, total: number): (number | "...")[] {
 }
 
 function Explore() {
-  const [q, setQ] = useState("");
+  const { q: initialQuery } = Route.useSearch();
+  const [q, setQ] = useState(initialQuery);
   const [providerId, setProviderId] = useState("fitgirl");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [genreFilter, setGenreFilter] = useState("all");
@@ -91,6 +95,11 @@ function Explore() {
   );
 
   useEffect(() => setIsDesktop(Boolean(window.nexus)), []);
+
+  useEffect(() => {
+    setQ(initialQuery);
+    setPage(1);
+  }, [initialQuery]);
 
   useEffect(() => {
     if (!isDesktop || !window.nexus) return;

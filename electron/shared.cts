@@ -9,6 +9,7 @@ export interface LibraryGame {
   cover: string | null;
   backgroundImage?: string | null;
   isFavorite?: boolean;
+  fitGirlSlug?: string | null;
   executablePath: string | null;
   installPath: string | null;
   lastPlayedAt: string | null;

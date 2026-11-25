@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ChevronLeft,
   ChevronRight,
@@ -6,10 +6,11 @@ import {
   Info,
   Music,
   Play,
+  Star,
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { GameRow } from "@/components/carousels/GameRow";
 import { featuredGameId, games, getGame, installedGames, recentlyAddedIds } from "@/data/mockGames";
@@ -155,6 +156,7 @@ function MockHomePage() {
 }
 
 function DesktopHomePage() {
+  const navigate = useNavigate();
   const [library, setLibrary] = useState<LibraryGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -162,8 +164,16 @@ function DesktopHomePage() {
   const [ambientOn, setAmbientOn] = useState(false);
   const [backgroundLoadingId, setBackgroundLoadingId] = useState<string | null>(null);
   const [failedBackgroundId, setFailedBackgroundId] = useState<string | null>(null);
+  const [homeFilter, setHomeFilter] = useState<"installed" | "favorites">("installed");
   const carouselRef = useRef<HTMLDivElement>(null);
   const backgroundLookups = useRef(new Set<string>());
+  const displayedLibrary = useMemo(
+    () =>
+      library.filter((game) =>
+        homeFilter === "installed" ? Boolean(game.executablePath) : Boolean(game.isFavorite),
+      ),
+    [homeFilter, library],
+  );
 
   useEffect(() => {
     if (!ambientOn) return;
@@ -184,15 +194,15 @@ function DesktopHomePage() {
   }, []);
 
   useEffect(() => {
-    if (library.length && !library.some((game) => game.id === focusedId)) {
-      setFocusedId((library.find((game) => game.executablePath) ?? library[0])?.id ?? null);
+    if (displayedLibrary.length && !displayedLibrary.some((game) => game.id === focusedId)) {
+      setFocusedId(displayedLibrary[0]?.id ?? null);
+    } else if (!displayedLibrary.length && focusedId) {
+      setFocusedId(null);
     }
-  }, [library, focusedId]);
+  }, [displayedLibrary, focusedId]);
 
   const featured =
-    library.find((game) => game.id === focusedId) ??
-    library.find((game) => game.executablePath) ??
-    library[0];
+    displayedLibrary.find((game) => game.id === focusedId) ?? displayedLibrary[0];
   const featuredBackground =
     failedBackgroundId === featured?.id
       ? featured?.cover
@@ -230,6 +240,27 @@ function DesktopHomePage() {
     [uiSoundsOn],
   );
 
+  const openGameDownload = useCallback(
+    async (game: LibraryGame) => {
+      try {
+        let slug = game.fitGirlSlug;
+        if (!slug) {
+          const catalog = await window.nexus!.getFitGirlCatalog();
+          const normalize = (value: string) => value.toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
+          slug = catalog.find((entry) => normalize(entry.title) === normalize(game.title))?.id;
+        }
+        if (slug) {
+          await navigate({ to: "/games/fitgirl/$slug", params: { slug } });
+        } else {
+          await navigate({ to: "/explore", search: { q: game.title } });
+        }
+      } catch {
+        toast.error("Could not open the game download page");
+      }
+    },
+    [navigate],
+  );
+
   const selectGame = useCallback(
     (game: LibraryGame) => {
       if (focusedId === game.id) return;
@@ -241,20 +272,20 @@ function DesktopHomePage() {
 
   const moveSelection = useCallback(
     (direction: -1 | 1) => {
-      if (!library.length) return;
+      if (!displayedLibrary.length) return;
       const currentIndex = Math.max(
         0,
-        library.findIndex((game) => game.id === featured?.id),
+        displayedLibrary.findIndex((game) => game.id === featured?.id),
       );
-      const nextIndex = Math.max(0, Math.min(library.length - 1, currentIndex + direction));
-      selectGame(library[nextIndex]!);
+      const nextIndex = Math.max(0, Math.min(displayedLibrary.length - 1, currentIndex + direction));
+      selectGame(displayedLibrary[nextIndex]!);
       carouselRef.current?.children[nextIndex]?.scrollIntoView({
         behavior: "smooth",
         block: "nearest",
         inline: "center",
       });
     },
-    [featured?.id, library, selectGame],
+    [displayedLibrary, featured?.id, selectGame],
   );
 
   useEffect(() => {
@@ -279,7 +310,10 @@ function DesktopHomePage() {
         }
         lastDirection = direction;
         const confirm = Boolean(controller.buttons[0]?.pressed);
-        if (confirm && !previousConfirm && featured?.executablePath) void launch(featured);
+        if (confirm && !previousConfirm && featured) {
+          if (featured.executablePath) void launch(featured);
+          else void openGameDownload(featured);
+        }
         previousConfirm = confirm;
       } else {
         lastDirection = 0;
@@ -289,7 +323,7 @@ function DesktopHomePage() {
     };
     frame = requestAnimationFrame(readController);
     return () => cancelAnimationFrame(frame);
-  }, [featured, launch, moveSelection]);
+  }, [featured, launch, moveSelection, openGameDownload]);
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden pb-16">
@@ -322,6 +356,27 @@ function DesktopHomePage() {
           </Link>
         </nav>
         <div className="flex items-center gap-2">
+          <div className="mr-2 flex rounded-full bg-secondary/80 p-1">
+            <Button
+              size="sm"
+              variant={homeFilter === "installed" ? "default" : "ghost"}
+              className="rounded-full"
+              aria-pressed={homeFilter === "installed"}
+              onClick={() => setHomeFilter("installed")}
+            >
+              Installed
+            </Button>
+            <Button
+              size="sm"
+              variant={homeFilter === "favorites" ? "default" : "ghost"}
+              className="rounded-full"
+              aria-pressed={homeFilter === "favorites"}
+              onClick={() => setHomeFilter("favorites")}
+            >
+              <Star className="mr-1 size-4" fill={homeFilter === "favorites" ? "currentColor" : "none"} />
+              Favorites
+            </Button>
+          </div>
           <Button
             variant="ghost"
             size="icon"
@@ -450,24 +505,34 @@ function DesktopHomePage() {
           }
         }}
       >
-        {library.length ? (
+        {displayedLibrary.length ? (
           <DesktopGameRow
-            title="Your games"
-            games={library}
+            title={homeFilter === "installed" ? "Installed games" : "Favorite games"}
+            games={displayedLibrary}
             focusedId={featured?.id ?? null}
             carouselRef={carouselRef}
             onFocusGame={selectGame}
             onLaunchGame={launch}
+            onOpenDownload={openGameDownload}
             uiSoundsOn={uiSoundsOn}
             onMove={moveSelection}
           />
         ) : (
           <div className="mt-8 rounded-2xl border border-border/70 bg-card/70 p-8 backdrop-blur-md">
-            <h2 className="font-display text-xl font-semibold">Your library is ready</h2>
+            <h2 className="font-display text-xl font-semibold">
+              {homeFilter === "favorites" ? "No favorite games yet" : "Your library is ready"}
+            </h2>
             <p className="mt-2 text-muted-foreground">
-              Add an installed game or add game information from the provider catalog.
+              {homeFilter === "favorites"
+                ? "Mark games as favorites in Explore or My Library to see them here."
+                : "Add an installed game or add game information from the provider catalog."}
             </p>
             <div className="mt-5 flex gap-3">
+              {homeFilter === "favorites" && (
+                <Button className="rounded-full" onClick={() => setHomeFilter("installed")}>
+                  Show installed games
+                </Button>
+              )}
               <Button className="rounded-full" asChild>
                 <Link to="/library">Open library</Link>
               </Button>
@@ -489,6 +554,7 @@ function DesktopGameRow({
   carouselRef,
   onFocusGame,
   onLaunchGame,
+  onOpenDownload,
   uiSoundsOn,
   onMove,
 }: {
@@ -498,6 +564,7 @@ function DesktopGameRow({
   carouselRef: React.RefObject<HTMLDivElement | null>;
   onFocusGame: (game: LibraryGame) => void;
   onLaunchGame: (game: LibraryGame) => void;
+  onOpenDownload: (game: LibraryGame) => void;
   uiSoundsOn: boolean;
   onMove: (direction: -1 | 1) => void;
 }) {
@@ -510,7 +577,7 @@ function DesktopGameRow({
           </p>
           <h2 className="mt-1 font-display text-2xl font-semibold">{title}</h2>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button
             variant="secondary"
             size="icon"
@@ -544,7 +611,7 @@ function DesktopGameRow({
                 onLaunchGame(game);
               } else {
                 playConsoleSound(uiSoundsOn, true);
-                toast.info("Choose this game's executable in My Library before launching it.");
+                onOpenDownload(game);
               }
             }}
             onMouseEnter={() => onFocusGame(game)}

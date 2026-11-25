@@ -494,7 +494,10 @@ function registerIpcHandlers(): void {
     const existing = database.getGames().find(
       (entry) => entry.title.trim().toLocaleLowerCase() === game.title.trim().toLocaleLowerCase(),
     );
-    if (existing) return database.setFavorite(existing.id, true);
+    if (existing) {
+      database.setFavorite(existing.id, true);
+      return database.setFitGirlSlug(existing.id, slug);
+    }
     const cover = game.cover
       ? await cacheRemoteArtwork(game.cover, `fitgirl-cover-${slug}`)
       : null;
@@ -509,6 +512,7 @@ function registerIpcHandlers(): void {
       cover,
       backgroundImage: null,
       isFavorite: true,
+      fitGirlSlug: slug,
       executablePath: null,
       installPath: null,
       lastPlayedAt: null,

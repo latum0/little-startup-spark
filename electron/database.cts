@@ -121,6 +121,7 @@ export class NexusDatabase {
         cover TEXT,
         background_image TEXT,
         is_favorite INTEGER NOT NULL DEFAULT 0,
+        fitgirl_slug TEXT,
         executable_path TEXT,
         install_path TEXT,
         last_played_at TEXT,
@@ -155,6 +156,9 @@ export class NexusDatabase {
     if (!gameColumns.some((column) => column.name === "is_favorite")) {
       this.db.exec("ALTER TABLE games ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0");
     }
+    if (!gameColumns.some((column) => column.name === "fitgirl_slug")) {
+      this.db.exec("ALTER TABLE games ADD COLUMN fitgirl_slug TEXT");
+    }
     this.db.prepare("UPDATE downloads SET state = 'cancelled' WHERE state = 'downloading'").run();
   }
 
@@ -164,6 +168,7 @@ export class NexusDatabase {
         `SELECT id, title, description, genre, release_date AS releaseDate,
       developer, publisher, cover, background_image AS backgroundImage,
       is_favorite AS isFavorite,
+      fitgirl_slug AS fitGirlSlug,
       executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games ORDER BY title COLLATE NOCASE`,
       )
@@ -177,6 +182,7 @@ export class NexusDatabase {
         `SELECT id, title, description, genre, release_date AS releaseDate,
       developer, publisher, cover, background_image AS backgroundImage,
       is_favorite AS isFavorite,
+      fitgirl_slug AS fitGirlSlug,
       executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games WHERE id = ?`,
       )
@@ -190,8 +196,8 @@ export class NexusDatabase {
     this.db
       .prepare(
         `INSERT INTO games (id, title, description, genre, release_date, developer, publisher,
-      cover, background_image, is_favorite, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
-      @releaseDate, @developer, @publisher, @cover, @backgroundImage, @isFavorite, @executablePath, @installPath, @createdAt)`,
+      cover, background_image, is_favorite, fitgirl_slug, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
+      @releaseDate, @developer, @publisher, @cover, @backgroundImage, @isFavorite, @fitGirlSlug, @executablePath, @installPath, @createdAt)`,
       )
       .run({ ...game, backgroundImage: game.backgroundImage ?? null, isFavorite: game.isFavorite ? 1 : 0 });
     return this.getGame(game.id)!;
@@ -222,6 +228,13 @@ export class NexusDatabase {
 
   setFavorite(id: string, isFavorite: boolean): LibraryGame {
     this.db.prepare("UPDATE games SET is_favorite = ? WHERE id = ?").run(isFavorite ? 1 : 0, id);
+    const game = this.getGame(id);
+    if (!game) throw new Error("Game not found");
+    return game;
+  }
+
+  setFitGirlSlug(id: string, slug: string): LibraryGame {
+    this.db.prepare("UPDATE games SET fitgirl_slug = ? WHERE id = ?").run(slug, id);
     const game = this.getGame(id);
     if (!game) throw new Error("Game not found");
     return game;

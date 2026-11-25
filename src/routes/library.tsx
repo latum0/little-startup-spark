@@ -328,12 +328,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function DesktopLibraryPage() {
+  const navigate = useNavigate();
   const [games, setGames] = useState<LibraryGame[]>([]);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [editingGame, setEditingGame] = useState<LibraryGame | null>(null);
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [libraryFilter, setLibraryFilter] = useState<"installed" | "favorites" | "all">("installed");
 
   const refresh = async () => {
     try {
@@ -462,6 +463,24 @@ function DesktopLibraryPage() {
     }
   };
 
+  const openGameDownload = async (game: LibraryGame) => {
+    try {
+      let slug = game.fitGirlSlug;
+      if (!slug) {
+        const catalog = await window.nexus!.getFitGirlCatalog();
+        const normalize = (value: string) => value.toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
+        slug = catalog.find((entry) => normalize(entry.title) === normalize(game.title))?.id;
+      }
+      if (slug) {
+        await navigate({ to: "/games/fitgirl/$slug", params: { slug } });
+      } else {
+        await navigate({ to: "/explore", search: { q: game.title } });
+      }
+    } catch {
+      toast.error("Could not open the game download page");
+    }
+  };
+
   const removeGame = async (game: LibraryGame) => {
     if (
       !window.confirm(
@@ -498,11 +517,15 @@ function DesktopLibraryPage() {
     }
   };
 
-  const filtered = games.filter(
-    (game) =>
-      (!favoritesOnly || game.isFavorite) &&
-      game.title.toLowerCase().includes(query.trim().toLowerCase()),
-  );
+  const filtered = games.filter((game) => {
+    const matchesFilter =
+      libraryFilter === "installed"
+        ? Boolean(game.executablePath)
+        : libraryFilter === "favorites"
+          ? Boolean(game.isFavorite)
+          : true;
+    return matchesFilter && game.title.toLowerCase().includes(query.trim().toLowerCase());
+  });
   const menu = (game: LibraryGame) => (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -587,22 +610,31 @@ function DesktopLibraryPage() {
           <div className="flex rounded-full bg-secondary p-1">
             <Button
               size="sm"
-              variant={favoritesOnly ? "ghost" : "default"}
+              variant={libraryFilter === "installed" ? "default" : "ghost"}
               className="rounded-full"
-              aria-pressed={!favoritesOnly}
-              onClick={() => setFavoritesOnly(false)}
+              aria-pressed={libraryFilter === "installed"}
+              onClick={() => setLibraryFilter("installed")}
             >
-              All games
+              Installed
             </Button>
             <Button
               size="sm"
-              variant={favoritesOnly ? "default" : "ghost"}
+              variant={libraryFilter === "favorites" ? "default" : "ghost"}
               className="rounded-full"
-              aria-pressed={favoritesOnly}
-              onClick={() => setFavoritesOnly(true)}
+              aria-pressed={libraryFilter === "favorites"}
+              onClick={() => setLibraryFilter("favorites")}
             >
-              <Star className="mr-1 size-4" fill={favoritesOnly ? "currentColor" : "none"} />
+              <Star className="mr-1 size-4" fill={libraryFilter === "favorites" ? "currentColor" : "none"} />
               Favorites
+            </Button>
+            <Button
+              size="sm"
+              variant={libraryFilter === "all" ? "default" : "ghost"}
+              className="rounded-full"
+              aria-pressed={libraryFilter === "all"}
+              onClick={() => setLibraryFilter("all")}
+            >
+              All games
             </Button>
           </div>
           <label className="flex w-64 items-center gap-2 rounded-full border border-border bg-secondary px-4 py-2 text-sm">
@@ -653,8 +685,10 @@ function DesktopLibraryPage() {
         <p className="mt-12 text-center text-muted-foreground">Loading library…</p>
       ) : filtered.length === 0 ? (
         <p className="mt-16 text-center text-muted-foreground">
-          {favoritesOnly
+          {libraryFilter === "favorites"
             ? "No favorites yet. Add games from FitGirl in Explore."
+            : libraryFilter === "installed" && games.length > 0
+              ? "No installed games match your search."
             : games.length
               ? "No games match your search."
               : "Your library is empty. Add an installed game or choose a game from Explore."}
@@ -663,12 +697,25 @@ function DesktopLibraryPage() {
         <div className="mt-8 grid grid-cols-5 gap-6">
           {filtered.map((game) => (
             <div key={game.id} className="group relative">
-              {cover(
-                game,
-                "aspect-[3/4] w-full rounded-2xl border border-border object-cover transition-transform duration-300 group-hover:scale-[1.02]",
-              )}
+              <button
+                type="button"
+                className="block w-full rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                aria-label={`Open ${game.title} download page`}
+                onClick={() => void openGameDownload(game)}
+              >
+                {cover(
+                  game,
+                  "aspect-[3/4] w-full rounded-2xl border border-border object-cover transition-transform duration-300 group-hover:scale-[1.02]",
+                )}
+              </button>
               <div className="absolute top-3 right-3">{menu(game)}</div>
-              <p className="mt-3 font-display text-sm font-semibold">{game.title}</p>
+              <button
+                type="button"
+                className="mt-3 text-left font-display text-sm font-semibold hover:text-primary"
+                onClick={() => void openGameDownload(game)}
+              >
+                {game.title}
+              </button>
               <p className="text-xs text-muted-foreground">
                 {game.executablePath ? "Installed" : "Select executable to launch"}
               </p>
@@ -703,9 +750,21 @@ function DesktopLibraryPage() {
         <div className="mt-8 divide-y divide-border rounded-2xl border border-border bg-card">
           {filtered.map((game) => (
             <div key={game.id} className="flex items-center gap-5 p-4">
-              {cover(game, "h-14 w-24 rounded-lg object-cover")}
+              <button
+                type="button"
+                aria-label={`Open ${game.title} download page`}
+                onClick={() => void openGameDownload(game)}
+              >
+                {cover(game, "h-14 w-24 rounded-lg object-cover")}
+              </button>
               <div className="flex-1">
-                <p className="font-display font-semibold">{game.title}</p>
+                <button
+                  type="button"
+                  className="text-left font-display font-semibold hover:text-primary"
+                  onClick={() => void openGameDownload(game)}
+                >
+                  {game.title}
+                </button>
                 <p className="text-xs text-muted-foreground">
                   {game.installPath ?? "Executable not selected"}
                 </p>
