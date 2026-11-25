@@ -334,7 +334,22 @@ function DesktopLibraryPage() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [editingGame, setEditingGame] = useState<LibraryGame | null>(null);
-  const [libraryFilter, setLibraryFilter] = useState<"installed" | "favorites" | "all">("installed");
+  const [libraryFilter, setLibraryFilter] = useState<"installed" | "favorites" | "all">(() => {
+    try {
+      const savedFilter = window.localStorage.getItem("nexus-library-filter");
+      return savedFilter === "favorites" || savedFilter === "all" ? savedFilter : "installed";
+    } catch {
+      return "installed";
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("nexus-library-filter", libraryFilter);
+    } catch {
+      // Keep the filter usable when browser storage is unavailable.
+    }
+  }, [libraryFilter]);
 
   const refresh = async () => {
     try {

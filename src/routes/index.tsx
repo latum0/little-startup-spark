@@ -164,7 +164,15 @@ function DesktopHomePage() {
   const [ambientOn, setAmbientOn] = useState(false);
   const [backgroundLoadingId, setBackgroundLoadingId] = useState<string | null>(null);
   const [failedBackgroundId, setFailedBackgroundId] = useState<string | null>(null);
-  const [homeFilter, setHomeFilter] = useState<"installed" | "favorites">("installed");
+  const [homeFilter, setHomeFilter] = useState<"installed" | "favorites">(() => {
+    try {
+      return window.localStorage.getItem("nexus-home-filter") === "favorites"
+        ? "favorites"
+        : "installed";
+    } catch {
+      return "installed";
+    }
+  });
   const carouselRef = useRef<HTMLDivElement>(null);
   const backgroundLookups = useRef(new Set<string>());
   const displayedLibrary = useMemo(
@@ -174,6 +182,14 @@ function DesktopHomePage() {
       ),
     [homeFilter, library],
   );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("nexus-home-filter", homeFilter);
+    } catch {
+      // Keep the filter usable when browser storage is unavailable.
+    }
+  }, [homeFilter]);
 
   useEffect(() => {
     if (!ambientOn) return;
