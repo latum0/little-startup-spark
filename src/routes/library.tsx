@@ -8,6 +8,7 @@ import {
   Play,
   Plus,
   Search,
+  Star,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -332,6 +333,7 @@ function DesktopLibraryPage() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [editingGame, setEditingGame] = useState<LibraryGame | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
 
   const refresh = async () => {
     try {
@@ -425,6 +427,18 @@ function DesktopLibraryPage() {
     }
   };
 
+  const setFavorite = async (game: LibraryGame, isFavorite: boolean) => {
+    try {
+      const updated = await window.nexus!.setGameFavorite(game.id, isFavorite);
+      setGames((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(
+        isFavorite ? `${game.title} added to favorites` : `${game.title} removed from favorites`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not update ${game.title}'s favorite`);
+    }
+  };
+
   const updateBackground = async (game: LibraryGame) => {
     try {
       const updated = await window.nexus!.chooseBackgroundForGame(game.id);
@@ -484,8 +498,10 @@ function DesktopLibraryPage() {
     }
   };
 
-  const filtered = games.filter((game) =>
-    game.title.toLowerCase().includes(query.trim().toLowerCase()),
+  const filtered = games.filter(
+    (game) =>
+      (!favoritesOnly || game.isFavorite) &&
+      game.title.toLowerCase().includes(query.trim().toLowerCase()),
   );
   const menu = (game: LibraryGame) => (
     <DropdownMenu>
@@ -496,6 +512,10 @@ function DesktopLibraryPage() {
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => void setFavorite(game, !game.isFavorite)}>
+          <Star className="mr-2 size-4" fill={game.isFavorite ? "currentColor" : "none"} />
+          {game.isFavorite ? "Remove from favorites" : "Add to favorites"}
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setEditingGame(game)}>Edit information</DropdownMenuItem>
         <DropdownMenuItem onClick={() => void updateCover(game)}>
           <Image className="mr-2 size-4" /> Change cover image
@@ -564,6 +584,27 @@ function DesktopLibraryPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex rounded-full bg-secondary p-1">
+            <Button
+              size="sm"
+              variant={favoritesOnly ? "ghost" : "default"}
+              className="rounded-full"
+              aria-pressed={!favoritesOnly}
+              onClick={() => setFavoritesOnly(false)}
+            >
+              All games
+            </Button>
+            <Button
+              size="sm"
+              variant={favoritesOnly ? "default" : "ghost"}
+              className="rounded-full"
+              aria-pressed={favoritesOnly}
+              onClick={() => setFavoritesOnly(true)}
+            >
+              <Star className="mr-1 size-4" fill={favoritesOnly ? "currentColor" : "none"} />
+              Favorites
+            </Button>
+          </div>
           <label className="flex w-64 items-center gap-2 rounded-full border border-border bg-secondary px-4 py-2 text-sm">
             <Search className="size-4 text-muted-foreground" />
             <input
@@ -612,9 +653,11 @@ function DesktopLibraryPage() {
         <p className="mt-12 text-center text-muted-foreground">Loading library…</p>
       ) : filtered.length === 0 ? (
         <p className="mt-16 text-center text-muted-foreground">
-          {games.length
-            ? "No games match your search."
-            : "Your library is empty. Add an installed game or choose a game from Explore."}
+          {favoritesOnly
+            ? "No favorites yet. Add games from FitGirl in Explore."
+            : games.length
+              ? "No games match your search."
+              : "Your library is empty. Add an installed game or choose a game from Explore."}
         </p>
       ) : view === "grid" ? (
         <div className="mt-8 grid grid-cols-5 gap-6">

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, Star } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -64,6 +64,8 @@ function Explore() {
   const [error, setError] = useState<string | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const [addedIds, setAddedIds] = useState<Set<number>>(() => new Set());
+  const [favoriteTitles, setFavoriteTitles] = useState<Set<string>>(() => new Set());
+  const [pendingFavoriteTitles, setPendingFavoriteTitles] = useState<Set<string>>(() => new Set());
   const [page, setPage] = useState(1);
   const [selectedGame, setSelectedGame] = useState<CatalogGame | null>(null);
   const [fitGirlMatch, setFitGirlMatch] = useState<CatalogGame | null>(null);
@@ -89,6 +91,52 @@ function Explore() {
   );
 
   useEffect(() => setIsDesktop(Boolean(window.nexus)), []);
+
+  useEffect(() => {
+    if (!isDesktop || !window.nexus) return;
+    void window.nexus.getLibrary().then((library) => {
+      setFavoriteTitles(
+        new Set(
+          library
+            .filter((game) => game.isFavorite)
+            .map((game) => game.title.trim().toLocaleLowerCase()),
+        ),
+      );
+    }).catch(() => toast.error("Could not load your favorites"));
+  }, [isDesktop]);
+
+  const toggleFitGirlFavorite = async (game: CatalogGame) => {
+    if (!window.nexus || !game.slug) return;
+    const key = game.title.trim().toLocaleLowerCase();
+    if (pendingFavoriteTitles.has(key)) return;
+    setPendingFavoriteTitles((current) => new Set(current).add(key));
+    try {
+      const library = await window.nexus.getLibrary();
+      const savedGame = library.find((item) => item.title.trim().toLocaleLowerCase() === key);
+      const favoriting = !favoriteTitles.has(key);
+      if (favoriting) {
+        await window.nexus.addFitGirlFavorite(game.slug);
+        setFavoriteTitles((current) => new Set(current).add(key));
+        toast.success(`${game.title} added to favorites`);
+      } else if (savedGame) {
+        await window.nexus.setGameFavorite(savedGame.id, false);
+        setFavoriteTitles((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
+        toast.success(`${game.title} removed from favorites`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not update ${game.title}'s favorite`);
+    } finally {
+      setPendingFavoriteTitles((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -359,6 +407,23 @@ function Explore() {
                     }}
                   >
                     {addedIds.has(game.sourceId) ? "In library" : "Add to library"}
+                  </Button>
+                </div>
+              )}
+              {isDesktop && providerId === "fitgirl" && game.slug && (
+                <div className="px-4 pb-4">
+                  <Button
+                    size="sm"
+                    variant={favoriteTitles.has(game.title.trim().toLocaleLowerCase()) ? "default" : "secondary"}
+                    className="w-full rounded-full"
+                    disabled={pendingFavoriteTitles.has(game.title.trim().toLocaleLowerCase())}
+                    onClick={() => void toggleFitGirlFavorite(game)}
+                  >
+                    <Star
+                      className="size-4"
+                      fill={favoriteTitles.has(game.title.trim().toLocaleLowerCase()) ? "currentColor" : "none"}
+                    />
+                    {favoriteTitles.has(game.title.trim().toLocaleLowerCase()) ? "Favorited" : "Add to favorites"}
                   </Button>
                 </div>
               )}

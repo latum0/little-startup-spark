@@ -33,6 +33,14 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("library:find-background", id) as Promise<
       Awaited<ReturnType<DesktopBridge["findGameBackground"]>>
     >,
+  setGameFavorite: (id, isFavorite) =>
+    ipcRenderer.invoke("library:set-favorite", { id, isFavorite }) as Promise<
+      Awaited<ReturnType<DesktopBridge["setGameFavorite"]>>
+    >,
+  addFitGirlFavorite: (slug) =>
+    ipcRenderer.invoke("library:add-fitgirl-favorite", slug) as Promise<
+      Awaited<ReturnType<DesktopBridge["addFitGirlFavorite"]>>
+    >,
   addMetadataGame: (id) =>
     ipcRenderer.invoke("library:add-metadata", id) as Promise<
       Awaited<ReturnType<DesktopBridge["addMetadataGame"]>>

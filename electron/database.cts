@@ -120,6 +120,7 @@ export class NexusDatabase {
         publisher TEXT NOT NULL DEFAULT '',
         cover TEXT,
         background_image TEXT,
+        is_favorite INTEGER NOT NULL DEFAULT 0,
         executable_path TEXT,
         install_path TEXT,
         last_played_at TEXT,
@@ -151,40 +152,49 @@ export class NexusDatabase {
     if (!gameColumns.some((column) => column.name === "background_image")) {
       this.db.exec("ALTER TABLE games ADD COLUMN background_image TEXT");
     }
+    if (!gameColumns.some((column) => column.name === "is_favorite")) {
+      this.db.exec("ALTER TABLE games ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0");
+    }
     this.db.prepare("UPDATE downloads SET state = 'cancelled' WHERE state = 'downloading'").run();
   }
 
   getGames(): LibraryGame[] {
-    return this.db
+    const games = this.db
       .prepare(
         `SELECT id, title, description, genre, release_date AS releaseDate,
       developer, publisher, cover, background_image AS backgroundImage,
+      is_favorite AS isFavorite,
       executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games ORDER BY title COLLATE NOCASE`,
       )
-      .all() as unknown as LibraryGame[];
+      .all() as unknown as (Omit<LibraryGame, "isFavorite"> & { isFavorite: number })[];
+    return games.map((game) => ({ ...game, isFavorite: Boolean(game.isFavorite) }));
   }
 
   getGame(id: string): LibraryGame | undefined {
-    return this.db
+    const game = this.db
       .prepare(
         `SELECT id, title, description, genre, release_date AS releaseDate,
       developer, publisher, cover, background_image AS backgroundImage,
+      is_favorite AS isFavorite,
       executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games WHERE id = ?`,
       )
-      .get(id) as unknown as LibraryGame | undefined;
+      .get(id) as unknown as
+      | (Omit<LibraryGame, "isFavorite"> & { isFavorite: number })
+      | undefined;
+    return game ? { ...game, isFavorite: Boolean(game.isFavorite) } : undefined;
   }
 
   addGame(game: LibraryGame): LibraryGame {
     this.db
       .prepare(
         `INSERT INTO games (id, title, description, genre, release_date, developer, publisher,
-      cover, background_image, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
-      @releaseDate, @developer, @publisher, @cover, @backgroundImage, @executablePath, @installPath, @createdAt)`,
+      cover, background_image, is_favorite, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
+      @releaseDate, @developer, @publisher, @cover, @backgroundImage, @isFavorite, @executablePath, @installPath, @createdAt)`,
       )
-      .run({ ...game, backgroundImage: game.backgroundImage ?? null });
-    return game;
+      .run({ ...game, backgroundImage: game.backgroundImage ?? null, isFavorite: game.isFavorite ? 1 : 0 });
+    return this.getGame(game.id)!;
   }
 
   setExecutable(id: string, executablePath: string, installPath: string): LibraryGame {
@@ -205,6 +215,13 @@ export class NexusDatabase {
 
   setBackgroundImage(id: string, image: string): LibraryGame {
     this.db.prepare("UPDATE games SET background_image = ? WHERE id = ?").run(image, id);
+    const game = this.getGame(id);
+    if (!game) throw new Error("Game not found");
+    return game;
+  }
+
+  setFavorite(id: string, isFavorite: boolean): LibraryGame {
+    this.db.prepare("UPDATE games SET is_favorite = ? WHERE id = ?").run(isFavorite ? 1 : 0, id);
     const game = this.getGame(id);
     if (!game) throw new Error("Game not found");
     return game;

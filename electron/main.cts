@@ -108,6 +108,8 @@ const externalMetadataInput = z.object({
   publisher: z.string().max(200),
   cover: z.string().url().max(2048).nullable(),
 });
+const gameFavoriteInput = z.object({ id: z.string().min(1).max(200), isFavorite: z.boolean() });
+const fitGirlSlugInput = z.string().min(1).max(200).regex(/^[a-z0-9][a-z0-9-]*$/i);
 const torrentUrlInput = z
   .string()
   .min(1)
@@ -483,6 +485,36 @@ function registerIpcHandlers(): void {
   registerHandler("library:update", gameUpdateInput, ({ id, details }) =>
     database.updateGame(id, details),
   );
+  registerHandler("library:set-favorite", gameFavoriteInput, ({ id, isFavorite }) =>
+    database.setFavorite(id, isFavorite),
+  );
+  registerHandler("library:add-fitgirl-favorite", fitGirlSlugInput, async (slug) => {
+    const game = (await fitGirlCatalog.getCatalog()).find((entry) => entry.id === slug);
+    if (!game) throw new Error("This game is no longer available in the FitGirl catalog.");
+    const existing = database.getGames().find(
+      (entry) => entry.title.trim().toLocaleLowerCase() === game.title.trim().toLocaleLowerCase(),
+    );
+    if (existing) return database.setFavorite(existing.id, true);
+    const cover = game.cover
+      ? await cacheRemoteArtwork(game.cover, `fitgirl-cover-${slug}`)
+      : null;
+    return database.addGame({
+      id: randomUUID(),
+      title: game.title,
+      description: "Saved from the FitGirl catalog. Select the game's executable after installing it.",
+      genre: "PC Repack",
+      releaseDate: "",
+      developer: "FitGirl",
+      publisher: "FitGirl Repacks",
+      cover,
+      backgroundImage: null,
+      isFavorite: true,
+      executablePath: null,
+      installPath: null,
+      lastPlayedAt: null,
+      createdAt: new Date().toISOString(),
+    });
+  });
   registerHandler("library:choose-cover", gameIdInput, async (id, event) => {
     const game = database.getGame(id);
     if (!game) throw new Error("Game not found");
