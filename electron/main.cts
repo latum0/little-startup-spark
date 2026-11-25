@@ -29,6 +29,7 @@ import type {
   AppSettings,
   DownloadItem,
   DownloadProgress,
+  FitGirlGameDetail,
   LibraryGame,
   MetadataRecord,
   TorrentStatus,
@@ -296,6 +297,27 @@ async function cacheRemoteArtwork(rawUrl: string, key: string): Promise<string |
   }
 }
 
+async function cacheFitGirlDetailArtwork(detail: FitGirlGameDetail): Promise<FitGirlGameDetail> {
+  const [cover, ...screenshots] = await Promise.all([
+    detail.cover
+      ? cacheRemoteArtwork(detail.cover, `fitgirl-cover-${detail.id}`).then(
+          (cached) => cached ?? detail.cover,
+        )
+      : Promise.resolve(""),
+    ...detail.screenshots.map((image, index) =>
+      cacheRemoteArtwork(image, `fitgirl-shot-${detail.id}-${index}`).then(
+        (cached) => cached ?? image,
+      ),
+    ),
+  ]);
+  return { ...detail, cover, screenshots };
+}
+
+function fitGirlImageForRenderer(image: string): string {
+  if (!image || image.startsWith(`${appOrigin}/covers/`)) return image;
+  return `${appOrigin}/remote-image?url=${encodeURIComponent(image)}`;
+}
+
 function validateHttpUrl(value: string): string {
   const url = new URL(value);
   if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
@@ -490,26 +512,33 @@ function registerIpcHandlers(): void {
     database.setFavorite(id, isFavorite),
   );
   registerHandler("library:add-fitgirl-favorite", fitGirlSlugInput, async (slug) => {
-    const game = (await fitGirlCatalog.getCatalog()).find((entry) => entry.id === slug);
-    if (!game) throw new Error("This game is no longer available in the FitGirl catalog.");
+    const cachedDetail = database.getFitGirlGameDetail(slug);
+    const detail = cachedDetail ?? (await fitGirlCatalog.getGameDetail(slug));
+    if (!cachedDetail) {
+      const localDetail = await cacheFitGirlDetailArtwork(detail);
+      database.saveFitGirlGameDetail(localDetail);
+    }
+    const savedDetail = database.getFitGirlGameDetail(slug) ?? detail;
     const existing = database.getGames().find(
-      (entry) => entry.title.trim().toLocaleLowerCase() === game.title.trim().toLocaleLowerCase(),
+      (entry) => entry.title.trim().toLocaleLowerCase() === detail.title.trim().toLocaleLowerCase(),
     );
     if (existing) {
       database.setFavorite(existing.id, true);
-      return database.setFitGirlSlug(existing.id, slug);
+      const associated = database.setFitGirlSlug(existing.id, slug);
+      if (!associated.cover && savedDetail.cover.startsWith(`${appOrigin}/covers/`)) {
+        return database.setCover(existing.id, savedDetail.cover);
+      }
+      return associated;
     }
-    const cover = game.cover
-      ? await cacheRemoteArtwork(game.cover, `fitgirl-cover-${slug}`)
-      : null;
+    const cover = savedDetail.cover.startsWith(`${appOrigin}/covers/`) ? savedDetail.cover : null;
     return database.addGame({
       id: randomUUID(),
-      title: game.title,
-      description: "Saved from the FitGirl catalog. Select the game's executable after installing it.",
-      genre: "PC Repack",
-      releaseDate: "",
-      developer: "FitGirl",
-      publisher: "FitGirl Repacks",
+      title: detail.title,
+      description: detail.description || "Saved from the FitGirl catalog.",
+      genre: detail.genre || "PC Repack",
+      releaseDate: detail.releaseYear ? String(detail.releaseYear) : "",
+      developer: detail.developer || "FitGirl",
+      publisher: detail.publisher || "FitGirl Repacks",
       cover,
       backgroundImage: null,
       isFavorite: true,
@@ -799,6 +828,20 @@ function registerIpcHandlers(): void {
       cover: game.cover ? `${appOrigin}/remote-image?url=${encodeURIComponent(game.cover)}` : "",
     })),
   );
+  registerHandler("fitgirl:favorites", noInput, () =>
+    database
+      .getGames()
+      .filter((game) => game.isFavorite && game.fitGirlSlug)
+      .map((game) => {
+        const detail = database.getFitGirlGameDetail(game.fitGirlSlug!);
+        return {
+          id: game.fitGirlSlug!,
+          title: game.title,
+          cover: fitGirlImageForRenderer(game.cover || detail?.cover || ""),
+          href: detail?.originalUrl || `https://fitgirl-repacks.site/${game.fitGirlSlug}/`,
+        };
+      }),
+  );
   registerHandler("recommendations:catalog", noInput, async () => {
     if (recommendationCache && Date.now() - recommendationCache.fetchedAt < 15 * 60_000) {
       return recommendationCache.games.map((game) => ({
@@ -909,15 +952,12 @@ function registerIpcHandlers(): void {
       .max(200)
       .regex(/^[a-z0-9][a-z0-9-]*$/i),
     async (slug) => {
-      const detail = await fitGirlCatalog.getGameDetail(slug);
+      const detail =
+        database.getFitGirlGameDetail(slug) ?? (await fitGirlCatalog.getGameDetail(slug));
       return {
         ...detail,
-        cover: detail.cover
-          ? `${appOrigin}/remote-image?url=${encodeURIComponent(detail.cover)}`
-          : "",
-        screenshots: detail.screenshots.map(
-          (url) => `${appOrigin}/remote-image?url=${encodeURIComponent(url)}`,
-        ),
+        cover: fitGirlImageForRenderer(detail.cover),
+        screenshots: detail.screenshots.map(fitGirlImageForRenderer),
       };
     },
   );

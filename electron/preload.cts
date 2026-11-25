@@ -98,6 +98,10 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("fitgirl:catalog") as Promise<
       Awaited<ReturnType<DesktopBridge["getFitGirlCatalog"]>>
     >,
+  getFitGirlFavorites: () =>
+    ipcRenderer.invoke("fitgirl:favorites") as Promise<
+      Awaited<ReturnType<DesktopBridge["getFitGirlFavorites"]>>
+    >,
   getFitGirlGameDetail: (slug) =>
     ipcRenderer.invoke("fitgirl:detail", slug) as Promise<
       Awaited<ReturnType<DesktopBridge["getFitGirlGameDetail"]>>

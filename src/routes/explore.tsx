@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { gameProviders, type CatalogGame } from "@/providers/catalog";
+import type { FitGirlGameSummary } from "../../electron/shared.cjs";
 
 const ITEMS_PER_PAGE = 24;
 const GOTY_WINNERS = new Set([
@@ -55,6 +56,26 @@ function getPageNumbers(current: number, total: number): (number | "...")[] {
     return [1, "...", total - 4, total - 3, total - 2, total - 1, total];
   }
   return [1, "...", current - 1, current, current + 1, "...", total];
+}
+
+function mapSavedFitGirlCards(summaries: FitGirlGameSummary[]): CatalogGame[] {
+  return summaries.map((game) => ({
+    id: `fitgirl-${game.id}`,
+    slug: game.id,
+    title: game.title,
+    genre: "PC Repack",
+    releaseYear: null,
+    description: "Saved locally. Open for cached game details and torrent links.",
+    developer: "FitGirl",
+    publisher: "FitGirl Repacks",
+    cover: game.cover,
+    href: `/games/fitgirl/${game.id}`,
+  }));
+}
+
+function mergeSavedFitGirlCards(items: CatalogGame[], saved: CatalogGame[]): CatalogGame[] {
+  const itemIds = new Set(items.map((item) => item.id));
+  return [...saved.filter((game) => !itemIds.has(game.id)), ...items];
 }
 
 function Explore() {
@@ -186,32 +207,48 @@ function Explore() {
     setPage(1);
     setCategoryFilter("all");
     setGenreFilter("all");
-    provider
-      .getGames()
-      .then((items) => {
-        if (active) setGames(items);
-      })
-      .catch(() => {
-        if (active) {
+    void (async () => {
+      let savedFitGirlCards: CatalogGame[] = [];
+      if (providerId === "fitgirl" && window.nexus) {
+        try {
+          savedFitGirlCards = mapSavedFitGirlCards(await window.nexus.getFitGirlFavorites());
+          if (active && savedFitGirlCards.length) {
+            setGames(savedFitGirlCards);
+            setLoading(false);
+          }
+        } catch {
+          // The live catalog can still load if local favorites are unavailable.
+        }
+      }
+
+      try {
+        const items = await provider.getGames();
+        if (active) setGames(mergeSavedFitGirlCards(items, savedFitGirlCards));
+      } catch {
+        if (active && !savedFitGirlCards.length) {
           setGames([]);
           setError(`Could not load games from ${provider.name}. Please try again.`);
         }
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    })();
     return () => {
       active = false;
     };
-  }, [provider]);
+  }, [provider, providerId]);
 
   useEffect(() => {
     if (!isDesktop || providerId !== "fitgirl" || loading || error) return;
     const timer = window.setInterval(() => {
-      void provider
-        .getGames()
-        .then((items) => {
-          setGames((current) => (items.length > current.length ? items : current));
+      void Promise.all([
+        provider.getGames(),
+        providerId === "fitgirl" && window.nexus
+          ? window.nexus.getFitGirlFavorites().then(mapSavedFitGirlCards)
+          : Promise.resolve([] as CatalogGame[]),
+      ])
+        .then(([items, saved]) => {
+          setGames(mergeSavedFitGirlCards(items, saved));
         })
         .catch(() => undefined);
     }, 4_000);

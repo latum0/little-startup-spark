@@ -151,6 +151,7 @@ export interface DesktopBridge {
   onDownloadProgress(callback: (progress: DownloadProgress) => void): () => void;
   getMetadataCatalog(): Promise<MetadataRecord[]>;
   getFitGirlCatalog(): Promise<FitGirlGameSummary[]>;
+  getFitGirlFavorites(): Promise<FitGirlGameSummary[]>;
   getFitGirlGameDetail(slug: string): Promise<FitGirlGameDetail>;
   getGameRecommendations(): Promise<GameRecommendation[]>;
   openTorrent(url: string): Promise<void>;

@@ -7,7 +7,12 @@ import { join } from "node:path";
 import initSqlJs from "sql.js";
 import type { SqlJsStatic } from "sql.js";
 import type { NexusDatabase as NexusDatabaseType } from "../../electron/database.cjs";
-import type { AppSettings, LibraryGame, MetadataRecord } from "../../electron/shared.cts";
+import type {
+  AppSettings,
+  FitGirlGameDetail,
+  LibraryGame,
+  MetadataRecord,
+} from "../../electron/shared.cts";
 
 const require = createRequire(import.meta.url);
 const { NexusDatabase } =
@@ -103,5 +108,34 @@ describe("NexusDatabase", () => {
     database = new NexusDatabase(databasePath, SQL);
 
     expect(database.getGame(game.id)?.title).toBe("Persistent Game");
+  });
+
+  it("keeps favorited FitGirl detail and torrent links available after reopening", () => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "nexus-fitgirl-cache-"));
+    const databasePath = join(temporaryDirectory, "nexus.sqlite");
+    const detail: FitGirlGameDetail = {
+      id: "sample-game",
+      title: "Sample Game",
+      cover: "https://example.com/sample-cover.jpg",
+      description: "Saved repack information",
+      genre: "Action",
+      releaseYear: 2025,
+      developer: "Studio",
+      publisher: "FitGirl Repacks",
+      sizeGB: "12 GB",
+      torrents: [
+        { label: "Torrent file", url: "https://example.com/sample-game.torrent" },
+        { label: "Magnet link", url: "magnet:?xt=urn:btih:samplehash" },
+      ],
+      screenshots: ["https://example.com/sample-screen.jpg"],
+      originalUrl: "https://fitgirl-repacks.site/sample-game/",
+    };
+
+    database = new NexusDatabase(databasePath, SQL);
+    database.saveFitGirlGameDetail(detail);
+    database.close();
+    database = new NexusDatabase(databasePath, SQL);
+
+    expect(database.getFitGirlGameDetail("sample-game")).toEqual(detail);
   });
 });

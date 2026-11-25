@@ -5,6 +5,7 @@ import type {
   DownloadItem,
   GameMetadataInput,
   LibraryGame,
+  FitGirlGameDetail,
   MetadataRecord,
 } from "./shared.cjs";
 
@@ -148,6 +149,11 @@ export class NexusDatabase {
         payload TEXT NOT NULL,
         expires_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS fitgirl_game_details (
+        slug TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        cached_at TEXT NOT NULL
+      );
     `);
     const gameColumns = this.db.prepare("PRAGMA table_info(games)").all();
     if (!gameColumns.some((column) => column.name === "background_image")) {
@@ -238,6 +244,22 @@ export class NexusDatabase {
     const game = this.getGame(id);
     if (!game) throw new Error("Game not found");
     return game;
+  }
+
+  getFitGirlGameDetail(slug: string): FitGirlGameDetail | undefined {
+    const row = this.db
+      .prepare("SELECT payload FROM fitgirl_game_details WHERE slug = ?")
+      .get(slug) as { payload: string } | undefined;
+    return row ? (JSON.parse(row.payload) as FitGirlGameDetail) : undefined;
+  }
+
+  saveFitGirlGameDetail(detail: FitGirlGameDetail): void {
+    this.db
+      .prepare(
+        `INSERT INTO fitgirl_game_details (slug, payload, cached_at) VALUES (?, ?, ?)
+         ON CONFLICT(slug) DO UPDATE SET payload = excluded.payload, cached_at = excluded.cached_at`,
+      )
+      .run(detail.id, JSON.stringify(detail), new Date().toISOString());
   }
 
   updateGame(id: string, details: GameMetadataInput): LibraryGame {
