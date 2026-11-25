@@ -142,6 +142,7 @@ export interface DesktopBridge {
   getSettings(): Promise<AppSettings>;
   getStorageInfo(): Promise<StorageInfo>;
   chooseDirectory(kind: "download" | "install"): Promise<string | null>;
+  chooseGameDownloadDirectory(gameTitle: string): Promise<string | null>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   getDownloads(): Promise<DownloadItem[]>;
   addDownload(url: string): Promise<DownloadItem | null>;

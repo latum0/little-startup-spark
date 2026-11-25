@@ -66,6 +66,8 @@ const bridge: DesktopBridge = {
     >,
   chooseDirectory: (kind) =>
     ipcRenderer.invoke("settings:choose-directory", kind) as Promise<string | null>,
+  chooseGameDownloadDirectory: (gameTitle) =>
+    ipcRenderer.invoke("torrents:choose-directory", gameTitle) as Promise<string | null>,
   saveSettings: (settings) =>
     ipcRenderer.invoke("settings:save", settings) as Promise<
       Awaited<ReturnType<DesktopBridge["saveSettings"]>>

@@ -89,9 +89,10 @@ function FitGirlGameDetails() {
 
     setBusy(true);
     try {
-      const settings = await window.nexus.getSettings();
+      const destination = await window.nexus.chooseGameDownloadDirectory(detail.title);
+      if (!destination) return;
       const safeTitle = detail.title.replace(/[<>:"/\\|?*]+/g, "").trim().replace(/[. ]+$/g, "") || "Game";
-      const savePath = `${settings.downloadDirectory}\\${safeTitle}`;
+      const savePath = `${destination}\\${safeTitle}`;
 
       const hash = await window.nexus.startTorrentDownload(torrent.url, savePath);
       setInfoHash(hash);
@@ -242,7 +243,7 @@ function FitGirlGameDetails() {
                 onClick={handleDownload}
                 disabled={busy || !torrent}
               >
-                <Download /> {busy ? "Starting…" : libraryGame ? "Download again" : "Download in App"}
+                <Download /> {busy ? "Starting…" : libraryGame ? "Download again to…" : "Choose download location"}
               </Button>
             )}
 

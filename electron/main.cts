@@ -110,6 +110,7 @@ const externalMetadataInput = z.object({
 });
 const gameFavoriteInput = z.object({ id: z.string().min(1).max(200), isFavorite: z.boolean() });
 const fitGirlSlugInput = z.string().min(1).max(200).regex(/^[a-z0-9][a-z0-9-]*$/i);
+const gameDownloadTitleInput = z.string().trim().min(1).max(200);
 const torrentUrlInput = z
   .string()
   .min(1)
@@ -947,6 +948,21 @@ function registerIpcHandlers(): void {
 
   registerHandler("torrents:open", torrentUrlInput, async (url) => {
     await shell.openExternal(url);
+  });
+
+  registerHandler("torrents:choose-directory", gameDownloadTitleInput, async (gameTitle, event) => {
+    const settings = database.getSettings(defaultSettings());
+    const parent = getMainWindow(event);
+    const options: OpenDialogOptions = {
+      title: `Choose download destination for ${gameTitle}`,
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: settings.downloadDirectory,
+      buttonLabel: "Download here",
+    };
+    const result = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
   /* ─────────────── BitTorrent Handlers ─────────────── */
