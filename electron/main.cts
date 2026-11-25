@@ -404,13 +404,34 @@ async function startDownload(id: string): Promise<void> {
   }
 }
 
-function removeRepackAfterInstallerSuccess(savePath: string, setupPath: string, gameTitle: string): void {
-  void removeCompletedRepack(savePath, setupPath, gameTitle)
-    .then((removed) => {
-      if (removed) console.info(`Removed completed repack files for ${gameTitle}`);
-      else console.warn(`Kept repack files for ${gameTitle}: cleanup path was not safe to remove.`);
-    })
-    .catch((error) => console.error(`Could not remove repack files for ${gameTitle}:`, error));
+async function confirmRepackCleanupAfterInstallerExit(
+  savePath: string,
+  setupPath: string,
+  gameTitle: string,
+): Promise<void> {
+  const options = {
+    type: "question" as const,
+    title: "Confirm game installation",
+    message: `Did ${gameTitle} finish installing?`,
+    detail:
+      "NEXUS cannot verify the install location for every repack installer. Keep the downloaded repack files if installation did not finish.",
+    buttons: ["Keep repack files", "Yes, delete repack files"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  };
+  const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const { response } = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  if (response !== 1) {
+    console.info(`Kept repack files for ${gameTitle} at the user's request.`);
+    return;
+  }
+
+  const removed = await removeCompletedRepack(savePath, setupPath, gameTitle);
+  if (removed) console.info(`Removed completed repack files for ${gameTitle}`);
+  else console.warn(`Kept repack files for ${gameTitle}: cleanup path was not safe to remove.`);
 }
 
 function monitorInstallerProcess(
@@ -430,7 +451,9 @@ function monitorInstallerProcess(
     if (handled) return;
     handled = true;
     if (code === 0 && !signal) {
-      removeRepackAfterInstallerSuccess(savePath, setupPath, gameTitle);
+      void confirmRepackCleanupAfterInstallerExit(savePath, setupPath, gameTitle).catch((error) =>
+        console.error(`Could not confirm repack cleanup for ${gameTitle}:`, error),
+      );
     } else {
       console.info(
         `Kept repack files for ${gameTitle}; installer exited with code ${code ?? "none"}${signal ? ` (${signal})` : ""}.`,
