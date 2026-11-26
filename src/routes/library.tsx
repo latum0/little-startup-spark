@@ -10,6 +10,7 @@ import {
   Plus,
   Search,
   Star,
+  ListChecks,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -335,10 +336,10 @@ function DesktopLibraryPage() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [editingGame, setEditingGame] = useState<LibraryGame | null>(null);
-  const [libraryFilter, setLibraryFilter] = useState<"installed" | "favorites" | "finished" | "all">(() => {
+  const [libraryFilter, setLibraryFilter] = useState<"installed" | "favorites" | "finished" | "up-next" | "all">(() => {
     try {
       const savedFilter = window.localStorage.getItem("nexus-library-filter");
-      return savedFilter === "favorites" || savedFilter === "finished" || savedFilter === "all"
+      return savedFilter === "favorites" || savedFilter === "finished" || savedFilter === "up-next" || savedFilter === "all"
         ? savedFilter
         : "installed";
     } catch {
@@ -470,6 +471,16 @@ function DesktopLibraryPage() {
     }
   };
 
+  const setUpNext = async (game: LibraryGame, isUpNext: boolean) => {
+    try {
+      const updated = await window.nexus!.setGameUpNext(game.id, isUpNext);
+      setGames((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(isUpNext ? `${game.title} added to Up Next` : `${game.title} removed from Up Next`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not update ${game.title}'s Up Next status`);
+    }
+  };
+
   const updateBackground = async (game: LibraryGame) => {
     try {
       const updated = await window.nexus!.chooseBackgroundForGame(game.id);
@@ -555,6 +566,8 @@ function DesktopLibraryPage() {
           ? Boolean(game.isFavorite)
           : libraryFilter === "finished"
             ? Boolean(game.isFinished)
+            : libraryFilter === "up-next"
+              ? Boolean(game.isUpNext)
           : true;
     return matchesFilter && game.title.toLowerCase().includes(query.trim().toLowerCase());
   });
@@ -574,6 +587,10 @@ function DesktopLibraryPage() {
         <DropdownMenuItem onClick={() => void setFinished(game, !game.isFinished)}>
           <CheckCircle2 className="mr-2 size-4" />
           {game.isFinished ? "Mark as unfinished" : "Mark as finished"}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void setUpNext(game, !game.isUpNext)}>
+          <ListChecks className="mr-2 size-4" />
+          {game.isUpNext ? "Remove from Up Next" : "Add to Up Next"}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setEditingGame(game)}>Edit information</DropdownMenuItem>
         <DropdownMenuItem onClick={() => void updateCover(game)}>
@@ -644,6 +661,16 @@ function DesktopLibraryPage() {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex rounded-full bg-secondary p-1">
+            <Button
+              size="sm"
+              variant={libraryFilter === "up-next" ? "default" : "ghost"}
+              className="rounded-full"
+              aria-pressed={libraryFilter === "up-next"}
+              onClick={() => setLibraryFilter("up-next")}
+            >
+              <ListChecks className="mr-1 size-4" />
+              Up Next
+            </Button>
             <Button
               size="sm"
               variant={libraryFilter === "installed" ? "default" : "ghost"}
@@ -735,6 +762,8 @@ function DesktopLibraryPage() {
             ? "No favorites yet. Add games from FitGirl in Explore."
             : libraryFilter === "finished"
               ? "No finished games yet. Mark games as finished from their options menu."
+              : libraryFilter === "up-next"
+                ? "Your Up Next list is empty. Add games from their options menu."
             : libraryFilter === "installed" && games.length > 0
               ? "No installed games match your search."
             : games.length

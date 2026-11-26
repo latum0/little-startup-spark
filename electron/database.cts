@@ -123,6 +123,7 @@ export class NexusDatabase {
         background_image TEXT,
         is_favorite INTEGER NOT NULL DEFAULT 0,
         is_finished INTEGER NOT NULL DEFAULT 0,
+        is_up_next INTEGER NOT NULL DEFAULT 0,
         fitgirl_slug TEXT,
         executable_path TEXT,
         install_path TEXT,
@@ -166,6 +167,9 @@ export class NexusDatabase {
     if (!gameColumns.some((column) => column.name === "is_finished")) {
       this.db.exec("ALTER TABLE games ADD COLUMN is_finished INTEGER NOT NULL DEFAULT 0");
     }
+    if (!gameColumns.some((column) => column.name === "is_up_next")) {
+      this.db.exec("ALTER TABLE games ADD COLUMN is_up_next INTEGER NOT NULL DEFAULT 0");
+    }
     if (!gameColumns.some((column) => column.name === "fitgirl_slug")) {
       this.db.exec("ALTER TABLE games ADD COLUMN fitgirl_slug TEXT");
     }
@@ -179,18 +183,21 @@ export class NexusDatabase {
       developer, publisher, cover, background_image AS backgroundImage,
       is_favorite AS isFavorite,
       is_finished AS isFinished,
+      is_up_next AS isUpNext,
       fitgirl_slug AS fitGirlSlug,
       executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games ORDER BY title COLLATE NOCASE`,
       )
-      .all() as unknown as (Omit<LibraryGame, "isFavorite" | "isFinished"> & {
+      .all() as unknown as (Omit<LibraryGame, "isFavorite" | "isFinished" | "isUpNext"> & {
       isFavorite: number;
       isFinished: number;
+      isUpNext: number;
     })[];
     return games.map((game) => ({
       ...game,
       isFavorite: Boolean(game.isFavorite),
       isFinished: Boolean(game.isFinished),
+      isUpNext: Boolean(game.isUpNext),
     }));
   }
 
@@ -201,14 +208,16 @@ export class NexusDatabase {
       developer, publisher, cover, background_image AS backgroundImage,
       is_favorite AS isFavorite,
       is_finished AS isFinished,
+      is_up_next AS isUpNext,
       fitgirl_slug AS fitGirlSlug,
       executable_path AS executablePath, install_path AS installPath,
       last_played_at AS lastPlayedAt, created_at AS createdAt FROM games WHERE id = ?`,
       )
       .get(id) as unknown as
-      | (Omit<LibraryGame, "isFavorite" | "isFinished"> & {
+      | (Omit<LibraryGame, "isFavorite" | "isFinished" | "isUpNext"> & {
           isFavorite: number;
           isFinished: number;
+          isUpNext: number;
         })
       | undefined;
     return game
@@ -216,6 +225,7 @@ export class NexusDatabase {
           ...game,
           isFavorite: Boolean(game.isFavorite),
           isFinished: Boolean(game.isFinished),
+          isUpNext: Boolean(game.isUpNext),
         }
       : undefined;
   }
@@ -224,14 +234,15 @@ export class NexusDatabase {
     this.db
       .prepare(
         `INSERT INTO games (id, title, description, genre, release_date, developer, publisher,
-      cover, background_image, is_favorite, is_finished, fitgirl_slug, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
-      @releaseDate, @developer, @publisher, @cover, @backgroundImage, @isFavorite, @isFinished, @fitGirlSlug, @executablePath, @installPath, @createdAt)`,
+      cover, background_image, is_favorite, is_finished, is_up_next, fitgirl_slug, executable_path, install_path, created_at) VALUES (@id, @title, @description, @genre,
+      @releaseDate, @developer, @publisher, @cover, @backgroundImage, @isFavorite, @isFinished, @isUpNext, @fitGirlSlug, @executablePath, @installPath, @createdAt)`,
       )
       .run({
         ...game,
         backgroundImage: game.backgroundImage ?? null,
         isFavorite: game.isFavorite ? 1 : 0,
         isFinished: game.isFinished ? 1 : 0,
+        isUpNext: game.isUpNext ? 1 : 0,
       });
     return this.getGame(game.id)!;
   }
@@ -268,6 +279,13 @@ export class NexusDatabase {
 
   setFinished(id: string, isFinished: boolean): LibraryGame {
     this.db.prepare("UPDATE games SET is_finished = ? WHERE id = ?").run(isFinished ? 1 : 0, id);
+    const game = this.getGame(id);
+    if (!game) throw new Error("Game not found");
+    return game;
+  }
+
+  setUpNext(id: string, isUpNext: boolean): LibraryGame {
+    this.db.prepare("UPDATE games SET is_up_next = ? WHERE id = ?").run(isUpNext ? 1 : 0, id);
     const game = this.getGame(id);
     if (!game) throw new Error("Game not found");
     return game;
