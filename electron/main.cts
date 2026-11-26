@@ -112,6 +112,7 @@ const externalMetadataInput = z.object({
   cover: z.string().url().max(2048).nullable(),
 });
 const gameFavoriteInput = z.object({ id: z.string().min(1).max(200), isFavorite: z.boolean() });
+const gameFinishedInput = z.object({ id: z.string().min(1).max(200), isFinished: z.boolean() });
 const fitGirlSlugInput = z.string().min(1).max(200).regex(/^[a-z0-9][a-z0-9-]*$/i);
 const gameDownloadTitleInput = z.string().trim().min(1).max(200);
 const torrentUrlInput = z
@@ -568,6 +569,9 @@ function registerIpcHandlers(): void {
   );
   registerHandler("library:set-favorite", gameFavoriteInput, ({ id, isFavorite }) =>
     database.setFavorite(id, isFavorite),
+  );
+  registerHandler("library:set-finished", gameFinishedInput, ({ id, isFinished }) =>
+    database.setFinished(id, isFinished),
   );
   registerHandler("library:add-fitgirl-favorite", fitGirlSlugInput, async (slug) => {
     const cachedDetail = database.getFitGirlGameDetail(slug);

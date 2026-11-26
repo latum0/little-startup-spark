@@ -9,6 +9,7 @@ export interface LibraryGame {
   cover: string | null;
   backgroundImage?: string | null;
   isFavorite?: boolean;
+  isFinished?: boolean;
   fitGirlSlug?: string | null;
   executablePath: string | null;
   installPath: string | null;
@@ -132,6 +133,7 @@ export interface DesktopBridge {
   findGameCover(id: string): Promise<LibraryGame>;
   findGameBackground(id: string): Promise<LibraryGame>;
   setGameFavorite(id: string, isFavorite: boolean): Promise<LibraryGame>;
+  setGameFinished(id: string, isFinished: boolean): Promise<LibraryGame>;
   addFitGirlFavorite(slug: string): Promise<LibraryGame>;
   addMetadataGame(id: number): Promise<LibraryGame>;
   addExternalMetadata(input: ExternalMetadataInput): Promise<LibraryGame>;

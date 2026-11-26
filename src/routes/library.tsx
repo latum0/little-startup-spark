@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   Gamepad2,
+  CheckCircle2,
   Image,
   LayoutGrid,
   List,
@@ -334,10 +335,12 @@ function DesktopLibraryPage() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [editingGame, setEditingGame] = useState<LibraryGame | null>(null);
-  const [libraryFilter, setLibraryFilter] = useState<"installed" | "favorites" | "all">(() => {
+  const [libraryFilter, setLibraryFilter] = useState<"installed" | "favorites" | "finished" | "all">(() => {
     try {
       const savedFilter = window.localStorage.getItem("nexus-library-filter");
-      return savedFilter === "favorites" || savedFilter === "all" ? savedFilter : "installed";
+      return savedFilter === "favorites" || savedFilter === "finished" || savedFilter === "all"
+        ? savedFilter
+        : "installed";
     } catch {
       return "installed";
     }
@@ -455,6 +458,18 @@ function DesktopLibraryPage() {
     }
   };
 
+  const setFinished = async (game: LibraryGame, isFinished: boolean) => {
+    try {
+      const updated = await window.nexus!.setGameFinished(game.id, isFinished);
+      setGames((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(
+        isFinished ? `${game.title} marked as finished` : `${game.title} moved out of finished`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Could not update ${game.title}'s status`);
+    }
+  };
+
   const updateBackground = async (game: LibraryGame) => {
     try {
       const updated = await window.nexus!.chooseBackgroundForGame(game.id);
@@ -538,6 +553,8 @@ function DesktopLibraryPage() {
         ? Boolean(game.executablePath)
         : libraryFilter === "favorites"
           ? Boolean(game.isFavorite)
+          : libraryFilter === "finished"
+            ? Boolean(game.isFinished)
           : true;
     return matchesFilter && game.title.toLowerCase().includes(query.trim().toLowerCase());
   });
@@ -553,6 +570,10 @@ function DesktopLibraryPage() {
         <DropdownMenuItem onClick={() => void setFavorite(game, !game.isFavorite)}>
           <Star className="mr-2 size-4" fill={game.isFavorite ? "currentColor" : "none"} />
           {game.isFavorite ? "Remove from favorites" : "Add to favorites"}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void setFinished(game, !game.isFinished)}>
+          <CheckCircle2 className="mr-2 size-4" />
+          {game.isFinished ? "Mark as unfinished" : "Mark as finished"}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setEditingGame(game)}>Edit information</DropdownMenuItem>
         <DropdownMenuItem onClick={() => void updateCover(game)}>
@@ -644,6 +665,16 @@ function DesktopLibraryPage() {
             </Button>
             <Button
               size="sm"
+              variant={libraryFilter === "finished" ? "default" : "ghost"}
+              className="rounded-full"
+              aria-pressed={libraryFilter === "finished"}
+              onClick={() => setLibraryFilter("finished")}
+            >
+              <CheckCircle2 className="mr-1 size-4" />
+              Finished
+            </Button>
+            <Button
+              size="sm"
               variant={libraryFilter === "all" ? "default" : "ghost"}
               className="rounded-full"
               aria-pressed={libraryFilter === "all"}
@@ -702,6 +733,8 @@ function DesktopLibraryPage() {
         <p className="mt-16 text-center text-muted-foreground">
           {libraryFilter === "favorites"
             ? "No favorites yet. Add games from FitGirl in Explore."
+            : libraryFilter === "finished"
+              ? "No finished games yet. Mark games as finished from their options menu."
             : libraryFilter === "installed" && games.length > 0
               ? "No installed games match your search."
             : games.length
@@ -732,7 +765,11 @@ function DesktopLibraryPage() {
                 {game.title}
               </button>
               <p className="text-xs text-muted-foreground">
-                {game.executablePath ? "Installed" : "Select executable to launch"}
+                {game.isFinished
+                  ? "Finished"
+                  : game.executablePath
+                    ? "Installed"
+                    : "Select executable to launch"}
               </p>
               <Button
                 size="sm"
@@ -785,7 +822,7 @@ function DesktopLibraryPage() {
                 </p>
               </div>
               <span className="w-32 text-sm text-muted-foreground">
-                {game.executablePath ? "Installed" : "Not installed"}
+                {game.isFinished ? "Finished" : game.executablePath ? "Installed" : "Not installed"}
               </span>
               <Button
                 size="sm"

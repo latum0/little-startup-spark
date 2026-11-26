@@ -37,6 +37,10 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("library:set-favorite", { id, isFavorite }) as Promise<
       Awaited<ReturnType<DesktopBridge["setGameFavorite"]>>
     >,
+  setGameFinished: (id, isFinished) =>
+    ipcRenderer.invoke("library:set-finished", { id, isFinished }) as Promise<
+      Awaited<ReturnType<DesktopBridge["setGameFinished"]>>
+    >,
   addFitGirlFavorite: (slug) =>
     ipcRenderer.invoke("library:add-fitgirl-favorite", slug) as Promise<
       Awaited<ReturnType<DesktopBridge["addFitGirlFavorite"]>>
