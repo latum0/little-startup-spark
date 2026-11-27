@@ -615,6 +615,45 @@ function registerIpcHandlers(): void {
       createdAt: new Date().toISOString(),
     });
   });
+  registerHandler("library:add-fitgirl-up-next", fitGirlSlugInput, async (slug) => {
+    const cachedDetail = database.getFitGirlGameDetail(slug);
+    const detail = cachedDetail ?? (await fitGirlCatalog.getGameDetail(slug));
+    if (!cachedDetail) {
+      const localDetail = await cacheFitGirlDetailArtwork(detail);
+      database.saveFitGirlGameDetail(localDetail);
+    }
+    const savedDetail = database.getFitGirlGameDetail(slug) ?? detail;
+    const existing = database.getGames().find(
+      (entry) => entry.title.trim().toLocaleLowerCase() === detail.title.trim().toLocaleLowerCase(),
+    );
+    if (existing) {
+      const associated = database.setFitGirlSlug(existing.id, slug);
+      const queued = database.setUpNext(associated.id, true);
+      if (!queued.cover && savedDetail.cover.startsWith(`${appOrigin}/covers/`)) {
+        return database.setCover(queued.id, savedDetail.cover);
+      }
+      return queued;
+    }
+    const cover = savedDetail.cover.startsWith(`${appOrigin}/covers/`) ? savedDetail.cover : null;
+    return database.addGame({
+      id: randomUUID(),
+      title: detail.title,
+      description: detail.description || "Saved from the FitGirl catalog.",
+      genre: detail.genre || "PC Repack",
+      releaseDate: detail.releaseYear ? String(detail.releaseYear) : "",
+      developer: detail.developer || "FitGirl",
+      publisher: detail.publisher || "FitGirl Repacks",
+      cover,
+      backgroundImage: null,
+      isFavorite: false,
+      isUpNext: true,
+      fitGirlSlug: slug,
+      executablePath: null,
+      installPath: null,
+      lastPlayedAt: null,
+      createdAt: new Date().toISOString(),
+    });
+  });
   registerHandler("library:choose-cover", gameIdInput, async (id, event) => {
     const game = database.getGame(id);
     if (!game) throw new Error("Game not found");

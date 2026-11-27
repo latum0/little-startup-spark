@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, Search, Star } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, ListChecks, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -89,8 +89,8 @@ function Explore() {
   const [error, setError] = useState<string | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const [addedIds, setAddedIds] = useState<Set<number>>(() => new Set());
-  const [favoriteTitles, setFavoriteTitles] = useState<Set<string>>(() => new Set());
-  const [pendingFavoriteTitles, setPendingFavoriteTitles] = useState<Set<string>>(() => new Set());
+  const [upNextTitles, setUpNextTitles] = useState<Set<string>>(() => new Set());
+  const [pendingUpNextTitles, setPendingUpNextTitles] = useState<Set<string>>(() => new Set());
   const [page, setPage] = useState(1);
   const [selectedGame, setSelectedGame] = useState<CatalogGame | null>(null);
   const [fitGirlMatch, setFitGirlMatch] = useState<CatalogGame | null>(null);
@@ -125,42 +125,42 @@ function Explore() {
   useEffect(() => {
     if (!isDesktop || !window.nexus) return;
     void window.nexus.getLibrary().then((library) => {
-      setFavoriteTitles(
+      setUpNextTitles(
         new Set(
           library
-            .filter((game) => game.isFavorite)
+            .filter((game) => game.isUpNext)
             .map((game) => game.title.trim().toLocaleLowerCase()),
         ),
       );
-    }).catch(() => toast.error("Could not load your favorites"));
+    }).catch(() => toast.error("Could not load your Up Next list"));
   }, [isDesktop]);
 
-  const toggleFitGirlFavorite = async (game: CatalogGame) => {
+  const toggleFitGirlUpNext = async (game: CatalogGame) => {
     if (!window.nexus || !game.slug) return;
     const key = game.title.trim().toLocaleLowerCase();
-    if (pendingFavoriteTitles.has(key)) return;
-    setPendingFavoriteTitles((current) => new Set(current).add(key));
+    if (pendingUpNextTitles.has(key)) return;
+    setPendingUpNextTitles((current) => new Set(current).add(key));
     try {
       const library = await window.nexus.getLibrary();
       const savedGame = library.find((item) => item.title.trim().toLocaleLowerCase() === key);
-      const favoriting = !favoriteTitles.has(key);
-      if (favoriting) {
-        await window.nexus.addFitGirlFavorite(game.slug);
-        setFavoriteTitles((current) => new Set(current).add(key));
-        toast.success(`${game.title} added to favorites`);
+      const adding = !upNextTitles.has(key);
+      if (adding) {
+        await window.nexus.addFitGirlUpNext(game.slug);
+        setUpNextTitles((current) => new Set(current).add(key));
+        toast.success(`${game.title} added to Up Next`);
       } else if (savedGame) {
-        await window.nexus.setGameFavorite(savedGame.id, false);
-        setFavoriteTitles((current) => {
+        await window.nexus.setGameUpNext(savedGame.id, false);
+        setUpNextTitles((current) => {
           const next = new Set(current);
           next.delete(key);
           return next;
         });
-        toast.success(`${game.title} removed from favorites`);
+        toast.success(`${game.title} removed from Up Next`);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Could not update ${game.title}'s favorite`);
+      toast.error(err instanceof Error ? err.message : `Could not update ${game.title}'s Up Next status`);
     } finally {
-      setPendingFavoriteTitles((current) => {
+      setPendingUpNextTitles((current) => {
         const next = new Set(current);
         next.delete(key);
         return next;
@@ -387,36 +387,25 @@ function Explore() {
         )}
       </div>
 
-      <div className="mt-8 grid grid-cols-4 gap-6">
+      <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
         {pageItems.map((game) => {
           const isSteamRecommendation = providerId === "steam-recommendations";
           const card: ReactNode = (
             <>
-              <div className="aspect-video overflow-hidden bg-secondary">
+              <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-border bg-secondary transition-transform duration-300 group-hover:scale-[1.02]">
                 <CatalogCover game={game} />
               </div>
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <h2 className="font-display font-semibold">{game.title}</h2>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {game.releaseYear ?? "—"}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-primary">{game.genre}</p>
-                <p className="mt-3 line-clamp-3 text-sm text-muted-foreground">
-                  {game.description || "Open to see details."}
-                </p>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  {game.developer} · {game.publisher}
-                </p>
-              </div>
+              <div className="mt-3 text-left font-display text-sm font-semibold">{game.title}</div>
+              <p className="text-xs text-muted-foreground">
+                {game.genre}{game.releaseYear ? ` · ${game.releaseYear}` : ""}
+              </p>
             </>
           );
 
           return (
             <div
               key={game.id}
-              className="overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/50"
+              className="group relative overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/50"
             >
               {isSteamRecommendation ? (
                 <button
@@ -457,19 +446,20 @@ function Explore() {
                 </div>
               )}
               {isDesktop && providerId === "fitgirl" && game.slug && (
-                <div className="px-4 pb-4">
+                <div className="px-3 pb-3">
                   <Button
                     size="sm"
-                    variant={favoriteTitles.has(game.title.trim().toLocaleLowerCase()) ? "default" : "secondary"}
+                    variant={upNextTitles.has(game.title.trim().toLocaleLowerCase()) ? "default" : "secondary"}
                     className="w-full rounded-full"
-                    disabled={pendingFavoriteTitles.has(game.title.trim().toLocaleLowerCase())}
-                    onClick={() => void toggleFitGirlFavorite(game)}
+                    disabled={pendingUpNextTitles.has(game.title.trim().toLocaleLowerCase())}
+                    onClick={() => void toggleFitGirlUpNext(game)}
                   >
-                    <Star
-                      className="size-4"
-                      fill={favoriteTitles.has(game.title.trim().toLocaleLowerCase()) ? "currentColor" : "none"}
-                    />
-                    {favoriteTitles.has(game.title.trim().toLocaleLowerCase()) ? "Favorited" : "Add to favorites"}
+                    {upNextTitles.has(game.title.trim().toLocaleLowerCase()) ? (
+                      <Check className="size-4" />
+                    ) : (
+                      <ListChecks className="size-4" />
+                    )}
+                    {upNextTitles.has(game.title.trim().toLocaleLowerCase()) ? "In Up Next" : "Add to Up Next"}
                   </Button>
                 </div>
               )}

@@ -137,6 +137,7 @@ export interface DesktopBridge {
   setGameFinished(id: string, isFinished: boolean): Promise<LibraryGame>;
   setGameUpNext(id: string, isUpNext: boolean): Promise<LibraryGame>;
   addFitGirlFavorite(slug: string): Promise<LibraryGame>;
+  addFitGirlUpNext(slug: string): Promise<LibraryGame>;
   addMetadataGame(id: number): Promise<LibraryGame>;
   addExternalMetadata(input: ExternalMetadataInput): Promise<LibraryGame>;
   updateGame(id: string, details: GameMetadataInput): Promise<LibraryGame>;

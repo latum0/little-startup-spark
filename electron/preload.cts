@@ -49,6 +49,10 @@ const bridge: DesktopBridge = {
     ipcRenderer.invoke("library:add-fitgirl-favorite", slug) as Promise<
       Awaited<ReturnType<DesktopBridge["addFitGirlFavorite"]>>
     >,
+  addFitGirlUpNext: (slug) =>
+    ipcRenderer.invoke("library:add-fitgirl-up-next", slug) as Promise<
+      Awaited<ReturnType<DesktopBridge["addFitGirlUpNext"]>>
+    >,
   addMetadataGame: (id) =>
     ipcRenderer.invoke("library:add-metadata", id) as Promise<
       Awaited<ReturnType<DesktopBridge["addMetadataGame"]>>
