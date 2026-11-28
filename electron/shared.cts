@@ -15,6 +15,7 @@ export interface LibraryGame {
   executablePath: string | null;
   installPath: string | null;
   lastPlayedAt: string | null;
+  playtimeSeconds?: number;
   createdAt: string;
 }
 

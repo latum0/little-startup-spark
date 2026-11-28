@@ -820,9 +820,23 @@ function registerIpcHandlers(): void {
     const game = database.getGame(id);
     if (!game?.executablePath || !existsSync(game.executablePath))
       throw new Error("Choose a valid executable for this game first.");
-    const error = await shell.openPath(game.executablePath);
-    if (error) throw new Error(error);
-    database.markPlayed(id);
+    const child = spawn(game.executablePath, [], {
+      cwd: game.installPath ?? dirname(game.executablePath),
+      detached: false,
+      stdio: "ignore",
+    });
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => reject(error);
+      child.once("error", onError);
+      child.once("spawn", () => {
+        const startedAt = Date.now();
+        database.markPlayed(id);
+        child.removeListener("error", onError);
+        child.on("error", () => undefined);
+        child.once("close", () => database.addPlaytime(id, (Date.now() - startedAt) / 1000));
+        resolve();
+      });
+    });
   });
   registerHandler("settings:get", noInput, () => database.getSettings(defaultSettings()));
   registerHandler("settings:storage", noInput, async () => {

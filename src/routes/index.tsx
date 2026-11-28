@@ -16,6 +16,7 @@ import { GameRow } from "@/components/carousels/GameRow";
 import { featuredGameId, games, getGame, installedGames, recentlyAddedIds } from "@/data/mockGames";
 import type { LibraryGame } from "../../electron/shared.cjs";
 import { toast } from "sonner";
+import { formatDistanceToNow } from "date-fns";
 
 let consoleAudio: AudioContext | null = null;
 
@@ -182,6 +183,13 @@ function DesktopHomePage() {
       ),
     [homeFilter, library],
   );
+  const lastPlayedGame = useMemo(
+    () =>
+      library
+        .filter((game) => game.executablePath && game.lastPlayedAt)
+        .sort((a, b) => Date.parse(b.lastPlayedAt!) - Date.parse(a.lastPlayedAt!))[0],
+    [library],
+  );
 
   useEffect(() => {
     try {
@@ -211,14 +219,20 @@ function DesktopHomePage() {
 
   useEffect(() => {
     if (displayedLibrary.length && !displayedLibrary.some((game) => game.id === focusedId)) {
-      setFocusedId(displayedLibrary[0]?.id ?? null);
+      setFocusedId(
+        displayedLibrary.find((game) => game.id === lastPlayedGame?.id)?.id ??
+          displayedLibrary[0]?.id ??
+          null,
+      );
     } else if (!displayedLibrary.length && focusedId) {
       setFocusedId(null);
     }
-  }, [displayedLibrary, focusedId]);
+  }, [displayedLibrary, focusedId, lastPlayedGame?.id]);
 
   const featured =
-    displayedLibrary.find((game) => game.id === focusedId) ?? displayedLibrary[0];
+    displayedLibrary.find((game) => game.id === focusedId) ??
+    lastPlayedGame ??
+    displayedLibrary[0];
   const featuredBackground =
     failedBackgroundId === featured?.id
       ? featured?.cover
@@ -468,7 +482,11 @@ function DesktopHomePage() {
           )}
           <div className="max-w-2xl">
             <p className="text-xs font-semibold tracking-[0.32em] text-primary uppercase">
-              {backgroundLoadingId === featured?.id ? "Finding game artwork…" : "Play your way"}
+              {backgroundLoadingId === featured?.id
+                ? "Finding game artwork…"
+                : lastPlayedGame?.id === featured?.id
+                  ? "Pick up where you left off"
+                  : "Play your way"}
             </p>
             <h1 className="mt-4 font-display text-5xl font-bold leading-tight drop-shadow-lg md:text-7xl">
               {loading ? "Loading your games…" : (featured?.title ?? "Welcome to NEXUS")}
@@ -484,6 +502,14 @@ function DesktopHomePage() {
                   ? "Choose an executable in your library to launch this game."
                   : "Add a game you already own, or explore game information from a provider.")}
             </p>
+            {lastPlayedGame?.id === featured?.id && featured.lastPlayedAt && (
+              <p className="mt-3 text-sm text-foreground/70">
+                Last played {formatDistanceToNow(new Date(featured.lastPlayedAt), { addSuffix: true })}
+                {featured.playtimeSeconds != null && featured.playtimeSeconds > 0 && (
+                  <> · {formatPlaytime(featured.playtimeSeconds)} played</>
+                )}
+              </p>
+            )}
             <div className="mt-7 flex gap-3">
               {featured?.executablePath ? (
                 <Button
@@ -491,7 +517,8 @@ function DesktopHomePage() {
                   className="rounded-full px-8"
                   onClick={() => void launch(featured)}
                 >
-                  <Play className="fill-current" /> Play
+                  <Play className="fill-current" />
+                  {lastPlayedGame?.id === featured?.id ? "Continue playing" : "Play"}
                 </Button>
               ) : (
                 <Button size="lg" variant="secondary" className="rounded-full px-6" asChild>
@@ -561,6 +588,13 @@ function DesktopHomePage() {
       </div>
     </div>
   );
+}
+
+function formatPlaytime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours === 0) return `${Math.max(1, minutes)}m`;
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 function DesktopGameRow({

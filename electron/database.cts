@@ -128,6 +128,7 @@ export class NexusDatabase {
         executable_path TEXT,
         install_path TEXT,
         last_played_at TEXT,
+        playtime_seconds INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS games_executable_path ON games(executable_path) WHERE executable_path IS NOT NULL;
@@ -170,6 +171,9 @@ export class NexusDatabase {
     if (!gameColumns.some((column) => column.name === "is_up_next")) {
       this.db.exec("ALTER TABLE games ADD COLUMN is_up_next INTEGER NOT NULL DEFAULT 0");
     }
+    if (!gameColumns.some((column) => column.name === "playtime_seconds")) {
+      this.db.exec("ALTER TABLE games ADD COLUMN playtime_seconds INTEGER NOT NULL DEFAULT 0");
+    }
     if (!gameColumns.some((column) => column.name === "fitgirl_slug")) {
       this.db.exec("ALTER TABLE games ADD COLUMN fitgirl_slug TEXT");
     }
@@ -186,7 +190,8 @@ export class NexusDatabase {
       is_up_next AS isUpNext,
       fitgirl_slug AS fitGirlSlug,
       executable_path AS executablePath, install_path AS installPath,
-      last_played_at AS lastPlayedAt, created_at AS createdAt FROM games ORDER BY title COLLATE NOCASE`,
+      last_played_at AS lastPlayedAt, playtime_seconds AS playtimeSeconds,
+      created_at AS createdAt FROM games ORDER BY title COLLATE NOCASE`,
       )
       .all() as unknown as (Omit<LibraryGame, "isFavorite" | "isFinished" | "isUpNext"> & {
       isFavorite: number;
@@ -211,7 +216,8 @@ export class NexusDatabase {
       is_up_next AS isUpNext,
       fitgirl_slug AS fitGirlSlug,
       executable_path AS executablePath, install_path AS installPath,
-      last_played_at AS lastPlayedAt, created_at AS createdAt FROM games WHERE id = ?`,
+      last_played_at AS lastPlayedAt, playtime_seconds AS playtimeSeconds,
+      created_at AS createdAt FROM games WHERE id = ?`,
       )
       .get(id) as unknown as
       | (Omit<LibraryGame, "isFavorite" | "isFinished" | "isUpNext"> & {
@@ -341,6 +347,12 @@ export class NexusDatabase {
     this.db
       .prepare("UPDATE games SET last_played_at = ? WHERE id = ?")
       .run(new Date().toISOString(), id);
+  }
+
+  addPlaytime(id: string, seconds: number): void {
+    if (seconds <= 0) return;
+    this.db.prepare("UPDATE games SET playtime_seconds = playtime_seconds + ? WHERE id = ?")
+      .run(Math.floor(seconds), id);
   }
 
   getSettings(defaults: AppSettings): AppSettings {
