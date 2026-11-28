@@ -186,7 +186,12 @@ function DesktopHomePage() {
   const lastPlayedGame = useMemo(
     () =>
       library
-        .filter((game) => game.executablePath && game.lastPlayedAt)
+        .filter(
+          (game) =>
+            game.executablePath &&
+            game.lastPlayedAt &&
+            Number.isFinite(Date.parse(game.lastPlayedAt)),
+        )
         .sort((a, b) => Date.parse(b.lastPlayedAt!) - Date.parse(a.lastPlayedAt!))[0],
     [library],
   );
@@ -502,7 +507,9 @@ function DesktopHomePage() {
                   ? "Choose an executable in your library to launch this game."
                   : "Add a game you already own, or explore game information from a provider.")}
             </p>
-            {lastPlayedGame?.id === featured?.id && featured.lastPlayedAt && (
+            {lastPlayedGame?.id === featured?.id &&
+              featured.lastPlayedAt &&
+              Number.isFinite(Date.parse(featured.lastPlayedAt)) && (
               <p className="mt-3 text-sm text-foreground/70">
                 Last played {formatDistanceToNow(new Date(featured.lastPlayedAt), { addSuffix: true })}
                 {featured.playtimeSeconds != null && featured.playtimeSeconds > 0 && (
